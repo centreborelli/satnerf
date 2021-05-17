@@ -1,0 +1,21 @@
+torch>=1.6.0
+torchvision>=0.5.0
+pytorch-lightning==0.7.5
+test-tube
+kornia==0.2.0
+opencv-python==4.2.0.34
+matplotlib
+jupyter
+einops
+torch-optimizer
+rpcm
+
+# for mesh
+PyMCubes
+pycollada
+trimesh
+pyglet
+
+# for point cloud
+plyfile
+open3d

@@ -1,0 +1,221 @@
+"""
+This script renders the input rays that are used to feed the NeRF model
+It discretizes each ray in the input batch into a set of 3d points at different depths of the scene
+Then the nerf model takes these 3d points (and the ray direction, optionally, as in the original nerf)
+and predicts a volume density at each location (sigma) and the color with which it appears
+"""
+
+import torch
+from einops import rearrange, reduce
+
+from rpcm_torch import localization
+
+def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
+    """
+    Sample @N_importance samples from @bins with distribution defined by @weights.
+    Args:
+        bins: (N_rays, N_samples_+1) where N_samples_ is "the number of coarse samples per ray - 2"
+        weights: (N_rays, N_samples_)
+        N_importance: the number of samples to draw from the distribution
+        det: deterministic or not
+        eps: a small number to prevent division by zero
+    Returns:
+        samples: the sampled samples
+    """
+    N_rays, N_samples_ = weights.shape
+    weights = weights + eps # prevent division by zero (don't do inplace op!)
+    pdf = weights / reduce(weights, 'n1 n2 -> n1 1', 'sum') # (N_rays, N_samples_)
+    cdf = torch.cumsum(pdf, -1) # (N_rays, N_samples), cumulative distribution function
+    cdf = torch.cat([torch.zeros_like(cdf[: ,:1]), cdf], -1)  # (N_rays, N_samples_+1)
+                                                               # padded to 0~1 inclusive
+
+    if det:
+        u = torch.linspace(0, 1, N_importance, device=bins.device)
+        u = u.expand(N_rays, N_importance)
+    else:
+        u = torch.rand(N_rays, N_importance, device=bins.device)
+    u = u.contiguous()
+
+    inds = torch.searchsorted(cdf, u, right=True)
+    below = torch.clamp_min(inds-1, 0)
+    above = torch.clamp_max(inds, N_samples_)
+
+    inds_sampled = rearrange(torch.stack([below, above], -1), 'n1 n2 c -> n1 (n2 c)', c=2)
+    cdf_g = rearrange(torch.gather(cdf, 1, inds_sampled), 'n1 (n2 c) -> n1 n2 c', c=2)
+    bins_g = rearrange(torch.gather(bins, 1, inds_sampled), 'n1 (n2 c) -> n1 n2 c', c=2)
+
+    denom = cdf_g[...,1]-cdf_g[...,0]
+    denom[denom<eps] = 1 # denom equals 0 means a bin has weight 0, in which case it will not be sampled
+                         # anyway, therefore any value for it is fine (set to 1 here)
+
+    samples = bins_g[...,0] + (u-cdf_g[...,0])/denom * (bins_g[...,1]-bins_g[...,0])
+    return samples
+
+
+def render_rays(models,
+                rays,
+                rpcs,
+                N_samples=64,
+                N_importance=0,
+                use_disp=False,
+                perturb=0,
+                noise_std=1,
+                chunk=1024*32,
+                white_back=False,
+                test_time=False
+                ):
+
+    def inference(model, xyz_, z_vals, weights_only=False):
+        """
+        Helper function that performs model inference
+        Args:
+            model: NeRF model (coarse or fine)
+            embedding_xyz: embedding module for xyz
+            xyz_: (N_rays, N_samples_, 3) sampled positions
+                  N_samples_ is the number of sampled points in each ray;
+                             = N_samples for coarse model
+                             = N_samples+N_importance for fine model
+            z_vals: (N_rays, N_samples_) depths of the sampled positions
+            weights_only: do inference on sigma only or not
+        Returns:
+            if weights_only:
+                weights: (N_rays, N_samples_): weights of each sample
+            else:
+                rgb_final: (N_rays, 3) the final rgb image
+                depth_final: (N_rays) depth map
+                weights: (N_rays, N_samples_): weights of each sample
+        """
+        N_rays = xyz_.shape[0]
+        N_samples_ = xyz_.shape[1]
+        xyz_ = xyz_.view(-1, 3)  # (N_rays*N_samples_, 3)
+
+        # the input batch is split in chunks to avoid possible problems with memory usage
+        batch_size = xyz_.shape[0]
+        out_chunks = []
+        for i in range(0, batch_size, chunk):
+            # run model
+            out_chunks += [model(xyz_[i:i + chunk], sigma_only=weights_only)]
+        out = torch.cat(out_chunks, 0)
+
+        if weights_only:
+            # predict only sigma
+            sigmas = out.view(N_rays, N_samples_)
+        else:
+            # predict both sigma and color
+            rgbsigma = out.view(N_rays, N_samples_, 4)
+            rgbs = rgbsigma[..., :3]  # (N_rays, N_samples_, 3)
+            sigmas = rgbsigma[..., 3]  # (N_rays, N_samples_)
+
+        # define deltas, i.e. the length between the points in which the ray is discretized
+        deltas = z_vals[:, 1:] - z_vals[:, :-1]  # (N_rays, N_samples_-1)
+        delta_inf = 1e10 * torch.ones_like(deltas[:, :1])  # (N_rays, 1) the last delta is infinity
+        deltas = torch.cat([deltas, delta_inf], -1)  # (N_rays, N_samples_)
+
+        # compute alpha as in the formula (3) of the nerf paper
+        noise = torch.randn(sigmas.shape, device=sigmas.device) * noise_std
+        alphas = 1 - torch.exp(-deltas * torch.relu(sigmas + noise))  # (N_rays, N_samples_)
+        alphas_shifted = \
+            torch.cat([torch.ones_like(alphas[:, :1]), 1 - alphas + 1e-10], -1)  # [1, a1, a2, ...]
+        weights = \
+            alphas * torch.cumprod(alphas_shifted, -1)[:, :-1]  # (N_rays, N_samples_)
+        weights_sum = weights.sum(1)  # (N_rays), the accumulated opacity along the rays
+        # equals "1 - (1-a1)(1-a2)...(1-an)" mathematically
+        if weights_only:
+            return weights
+
+        # compute final weighted outputs
+        rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)  # (N_rays, 3)
+        depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
+
+        if white_back:
+            rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
+
+        return rgb_final, depth_final, weights
+
+    def altitude_based_sampling(rays, rpcs, z_vals):
+        """
+        Helper function that discretizes the input rays between the min and max depth values
+        The altitude based sampling proposed by S-NeRF for Multi-view Satellite Photogrammetry is used
+        Args:
+            rays: (N_rays, 8) each row gives the necessary data to discretize a ray across the object space
+                  row format: [col, row, cam_idx, near, far, sun_rays_d]
+                               (col, row) - image pixel where the ray projects to
+                               cam_idx - index of the camera where the ray projects to
+                               near, far - minimum and maximum altitudes of the scene
+                               sun_rays_d - 3-valued vector with the sun light direction
+            rpcs: list of rpcm objects, to localize each image pixel at different altitudes in the object space
+            z_vals: (N_rays, N_samples_) depths at which each ray is to be discretized
+        Returns:
+            xyz_: (N_rays, N_samples_, 3) set of 3d points, one point for each depth of each ray
+        """
+        N_samples_ = z_vals.shape[1]
+        N_rays = rays.shape[0]
+        cols_, rows_, cam_idx = rays[:, 0:1], rays[:, 1:2], rays[:, 2]
+        xyz_ = torch.zeros(N_rays,  N_samples_, 3, dtype=torch.float, device=rays.device)
+        # TODO this should be optimized, it is ugly to use a loop here
+        for c_idx in torch.unique(cam_idx):
+            c_idx = c_idx.type(torch.int).cpu()
+            n_rays_current_cam = torch.sum(cam_idx == c_idx)
+            cols = cols_[cam_idx == c_idx].repeat(1, N_samples_).flatten()
+            rows = rows_[cam_idx == c_idx].repeat(1, N_samples_).flatten()
+            alts = z_vals[cam_idx == c_idx].flatten()
+            lons, lats = localization(rpcs[c_idx], cols, rows, alts)
+            pts3d = torch.vstack([lons, lats, alts]).T
+            xyz_[cam_idx == c_idx, :, :] = pts3d.float().reshape(n_rays_current_cam,  N_samples_, 3)
+        return xyz_
+
+    # sample depth points
+    near, far = rays[:, 3:4], rays[:, 4:5]
+    z_steps = torch.linspace(0, 1, N_samples, device=rays.device)
+    if not use_disp:  # use linear sampling in depth space
+        z_vals = near * (1-z_steps) + far * z_steps
+    else:  # use linear sampling in disparity space
+        z_vals = 1/(1/near * (1-z_steps) + 1/far * z_steps)
+
+    if perturb > 0:  # perturb sampling depths (z_vals)
+        z_vals_mid = 0.5 * (z_vals[:, :-1] + z_vals[:, 1:])  # (N_rays, N_samples-1) interval mid points
+        # get intervals between samples
+        upper = torch.cat([z_vals_mid, z_vals[:, -1:]], -1)
+        lower = torch.cat([z_vals[:, :1], z_vals_mid], -1)
+
+        perturb_rand = perturb * torch.rand_like(z_vals)
+        z_vals = lower + (upper - lower) * perturb_rand
+
+    # discretize the input rays
+    xyz_coarse = altitude_based_sampling(rays, rpcs, z_vals)
+
+    # run coarse model
+    model_coarse = models[0]
+    if test_time:
+        weights_coarse = \
+            inference(model_coarse, xyz_coarse, z_vals, weights_only=True)
+    else:
+        rgb_coarse, depth_coarse, weights_coarse = \
+            inference(model_coarse, xyz_coarse, z_vals, weights_only=False)
+        result = {'rgb_coarse': rgb_coarse,
+                  'depth_coarse': depth_coarse,
+                  'opacity_coarse': weights_coarse.sum(1)}
+
+    # run fine model
+    if N_importance > 0:
+
+        # sample altitudes for fine model
+        z_vals_mid = 0.5 * (z_vals[:, :-1] + z_vals[:, 1:])  # (N_rays, N_samples-1) interval mid points
+        z_vals_ = sample_pdf(z_vals_mid, weights_coarse[:, 1:-1],
+                             N_importance, det=(perturb == 0)).detach()
+        # detach so that grad doesn't propogate to weights_coarse from here
+        z_vals, _ = torch.sort(torch.cat([z_vals, z_vals_], -1), -1)
+
+        # discretize the rays for the fine model
+        xyz_fine = altitude_based_sampling(rays, rpcs, z_vals)
+
+        # run fine model
+        model_fine = models[1]
+        rgb_fine, depth_fine, weights_fine = \
+            inference(model_fine, xyz_fine, z_vals, weights_only=False)
+
+        result['rgb_fine'] = rgb_fine
+        result['depth_fine'] = depth_fine
+        result['opacity_fine'] = weights_fine.sum(1)
+
+        return result

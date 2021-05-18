@@ -8,8 +8,6 @@ and predicts a volume density at each location (sigma) and the color with which 
 import torch
 from einops import rearrange, reduce
 
-from rpcm_torch import localization
-
 def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
     """
     Sample @N_importance samples from @bins with distribution defined by @weights.
@@ -54,7 +52,6 @@ def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
 
 def render_rays(models,
                 rays,
-                rpcs,
                 N_samples=64,
                 N_importance=0,
                 use_disp=False,
@@ -92,6 +89,7 @@ def render_rays(models,
         # the input batch is split in chunks to avoid possible problems with memory usage
         batch_size = xyz_.shape[0]
         out_chunks = []
+
         for i in range(0, batch_size, chunk):
             # run model
             out_chunks += [model(xyz_[i:i + chunk], sigma_only=weights_only)]
@@ -132,40 +130,9 @@ def render_rays(models,
 
         return rgb_final, depth_final, weights
 
-    def altitude_based_sampling(rays, rpcs, z_vals):
-        """
-        Helper function that discretizes the input rays between the min and max depth values
-        The altitude based sampling proposed by S-NeRF for Multi-view Satellite Photogrammetry is used
-        Args:
-            rays: (N_rays, 8) each row gives the necessary data to discretize a ray across the object space
-                  row format: [col, row, cam_idx, near, far, sun_rays_d]
-                               (col, row) - image pixel where the ray projects to
-                               cam_idx - index of the camera where the ray projects to
-                               near, far - minimum and maximum altitudes of the scene
-                               sun_rays_d - 3-valued vector with the sun light direction
-            rpcs: list of rpcm objects, to localize each image pixel at different altitudes in the object space
-            z_vals: (N_rays, N_samples_) depths at which each ray is to be discretized
-        Returns:
-            xyz_: (N_rays, N_samples_, 3) set of 3d points, one point for each depth of each ray
-        """
-        N_samples_ = z_vals.shape[1]
-        N_rays = rays.shape[0]
-        cols_, rows_, cam_idx = rays[:, 0:1], rays[:, 1:2], rays[:, 2]
-        xyz_ = torch.zeros(N_rays,  N_samples_, 3, dtype=torch.float, device=rays.device)
-        # TODO this should be optimized, it is ugly to use a loop here
-        for c_idx in torch.unique(cam_idx):
-            c_idx = c_idx.type(torch.int).cpu()
-            n_rays_current_cam = torch.sum(cam_idx == c_idx)
-            cols = cols_[cam_idx == c_idx].repeat(1, N_samples_).flatten()
-            rows = rows_[cam_idx == c_idx].repeat(1, N_samples_).flatten()
-            alts = z_vals[cam_idx == c_idx].flatten()
-            lons, lats = localization(rpcs[c_idx], cols, rows, alts)
-            pts3d = torch.vstack([lons, lats, alts]).T
-            xyz_[cam_idx == c_idx, :, :] = pts3d.float().reshape(n_rays_current_cam,  N_samples_, 3)
-        return xyz_
-
     # sample depth points
-    near, far = rays[:, 3:4], rays[:, 4:5]
+    rays_o, rays_d = rays[:, 0:3],  rays[:, 3:6]
+    near, far = rays[:, 6:7], rays[:, 7:8]
     z_steps = torch.linspace(0, 1, N_samples, device=rays.device)
     if not use_disp:  # use linear sampling in depth space
         z_vals = near * (1-z_steps) + far * z_steps
@@ -182,7 +149,10 @@ def render_rays(models,
         z_vals = lower + (upper - lower) * perturb_rand
 
     # discretize the input rays
-    xyz_coarse = altitude_based_sampling(rays, rpcs, z_vals)
+    # xyz_: (N_rays, N_samples_, 3) set of 3d points, one point for each depth of each ray
+    rays_o = rearrange(rays_o, 'n1 c -> n1 1 c')
+    rays_d = rearrange(rays_d, 'n1 c -> n1 1 c')
+    xyz_coarse = rays_o + rays_d * rearrange(z_vals, 'n1 n2 -> n1 n2 1')
 
     # run coarse model
     model_coarse = models[0]
@@ -207,7 +177,7 @@ def render_rays(models,
         z_vals, _ = torch.sort(torch.cat([z_vals, z_vals_], -1), -1)
 
         # discretize the rays for the fine model
-        xyz_fine = altitude_based_sampling(rays, rpcs, z_vals)
+        xyz_fine = rays_o + rays_d * rearrange(z_vals, 'n1 n2 -> n1 n2 1')
 
         # run fine model
         model_fine = models[1]

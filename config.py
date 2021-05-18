@@ -20,6 +20,8 @@ class TrainingConfig:
     noise_std: float = 1.0      # std dev of noise added to regularize sigma
     use_disp: bool = False      # use disparity depth sampling
 
+    train_steps: int = 100000
+
 
 @dataclasses.dataclass
 class DefaultConfig:

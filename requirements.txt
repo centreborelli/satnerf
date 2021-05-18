@@ -8,7 +8,7 @@ matplotlib
 jupyter
 einops
 torch-optimizer
-rpcm
+rpcm @ git+https://github.com/cmla/rpcm.git@localization-origin
 
 # for mesh
 PyMCubes

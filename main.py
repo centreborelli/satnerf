@@ -25,7 +25,7 @@ class NeRF_pl(pl.LightningModule):
         self.conf = load_config(args)
         self.loss = load_loss(args)
         self.define_models()
-        self.save_hyperparameters('lr', 'train/loss', 'train/psnr')
+        #self.save_hyperparameters('lr', 'train/loss', 'train/psnr')
 
     def define_models(self):
 
@@ -50,7 +50,7 @@ class NeRF_pl(pl.LightningModule):
 
             self.models += [self.nerf_fine]
 
-    def forward(self, rays, rpcs):
+    def forward(self, rays):
 
         chunk_size = self.conf.training.chunk
         batch_size = rays.shape[0]
@@ -60,7 +60,6 @@ class NeRF_pl(pl.LightningModule):
             rendered_ray_chunks = \
                 render_rays(self.models,
                             rays[i:i + chunk_size],
-                            rpcs,
                             self.conf.n_samples,
                             self.conf.n_importance,
                             self.conf.training.use_disp,
@@ -77,7 +76,7 @@ class NeRF_pl(pl.LightningModule):
 
     def prepare_data(self):
         self.train_dataset = load_dataset(self.args, split='train')
-        #self.val_dataset = load_dataset(self.args, split='val')
+        self.val_dataset = load_dataset(self.args, split='val')
 
     def configure_optimizers(self):
 
@@ -86,7 +85,17 @@ class NeRF_pl(pl.LightningModule):
                                           lr=self.conf.training.lr,
                                           weight_decay=self.conf.training.weight_decay)
 
-        return [self.optimizer]
+        steps_per_epoch = len(self.train_dataset)/self.conf.training.bs
+        num_steps = self.conf.training.train_steps
+        num_epochs = int(num_steps//steps_per_epoch)
+        final_lr = float(1e-5)
+
+        #gamma = (final_lr / self.self.conf.training.lr) ** (1 / num_epochs)
+        #torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma, last_epoch=-1, verbose=False)
+
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=num_epochs, eta_min=final_lr)
+
+        return [self.optimizer], [scheduler]
 
     def train_dataloader(self):
         return DataLoader(self.train_dataset,
@@ -95,15 +104,20 @@ class NeRF_pl(pl.LightningModule):
                           batch_size=self.conf.training.bs,
                           pin_memory=True)
 
+    def val_dataloader(self):
+        return DataLoader(self.val_dataset,
+                          shuffle=False,
+                          num_workers=4,
+                          batch_size=1,  # validate one image (H*W rays) at a time
+                          pin_memory=True)
+
     def training_step(self, batch, batch_idx):
         self.log('lr', utils.get_learning_rate(self.optimizer))
-        rays = batch["rays"]
-        rgbs = batch["rgbs"]
 
-        results = self(rays, self.train_dataset.image_rpcs)
+        rays, rgbs = batch['rays'], batch['rgbs']
+        results = self(rays)
         loss = self.loss(results, rgbs)
         self.log('train/loss', loss)
-        self.logger.log_hyperparams(params=self.hparams, metrics={"your_metric": value})
         typ = 'fine' if 'rgb_fine' in results else 'coarse'
 
         with torch.no_grad():
@@ -113,7 +127,29 @@ class NeRF_pl(pl.LightningModule):
         return {'loss': loss,
                 'progress_bar': {'train_psnr': psnr_}}
 
+    def validation_step(self, batch, batch_nb):
 
+        rays, rgbs = batch['rays'], batch['rgbs']
+        rays = rays.squeeze()  # (H*W, 3)
+        rgbs = rgbs.squeeze()  # (H*W, 3)
+        results = self(rays)
+        loss = self.loss(results, rgbs)
+        self.log('val/loss', loss)
+        typ = 'fine' if 'rgb_fine' in results else 'coarse'
+
+        if batch_nb == 0:
+            W, H = 1024, 1024
+            img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
+            img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
+            depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)
+            stack = torch.stack([img_gt, img, depth])  # (3, 3, H, W)
+            self.logger.experiment.add_images('val/GT_pred_depth',
+                                              stack, self.global_step)
+
+        psnr_ = metrics.psnr(results[f'rgb_{typ}'], rgbs)
+        self.log('val/psnr', psnr_)
+
+        return {'loss': loss}
 
 def main():
 
@@ -141,6 +177,7 @@ def main():
                          benchmark=True,
                          weights_summary=None,
                          num_sanity_val_steps=1,
+                         check_val_every_n_epoch=1,
                          profiler="simple")
 
     trainer.fit(system)

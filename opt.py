@@ -27,5 +27,7 @@ def get_opts():
                         help='Root directory of dataset')
     parser.add_argument('--img_dir', type=str, default=None,
                         help='Directory where the images are located (if different than root_dir)')
+    parser.add_argument('--cache_dir', type=str, default=None,
+                        help='Directory where cache for the current dataset is found')
 
     return parser.parse_args()

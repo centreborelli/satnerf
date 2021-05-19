@@ -80,7 +80,7 @@ def add_perturbation(img, perturbation, seed):
 
 
 class BlenderDataset(Dataset):
-    def __init__(self, root_dir, split='train', img_wh=(800, 800),
+    def __init__(self, root_dir, split='train', img_wh=(400, 400),
                  perturbation=[]):
         self.root_dir = root_dir
         self.split = split

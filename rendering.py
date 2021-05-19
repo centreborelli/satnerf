@@ -6,7 +6,6 @@ and predicts a volume density at each location (sigma) and the color with which 
 """
 
 import torch
-from einops import rearrange, reduce
 
 def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
     """
@@ -22,7 +21,7 @@ def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
     """
     N_rays, N_samples_ = weights.shape
     weights = weights + eps # prevent division by zero (don't do inplace op!)
-    pdf = weights / reduce(weights, 'n1 n2 -> n1 1', 'sum') # (N_rays, N_samples_)
+    pdf = weights / torch.sum(weights, -1, keepdim=True) # (N_rays, N_samples_)
     cdf = torch.cumsum(pdf, -1) # (N_rays, N_samples), cumulative distribution function
     cdf = torch.cat([torch.zeros_like(cdf[: ,:1]), cdf], -1)  # (N_rays, N_samples_+1)
                                                                # padded to 0~1 inclusive
@@ -38,9 +37,9 @@ def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
     below = torch.clamp_min(inds-1, 0)
     above = torch.clamp_max(inds, N_samples_)
 
-    inds_sampled = rearrange(torch.stack([below, above], -1), 'n1 n2 c -> n1 (n2 c)', c=2)
-    cdf_g = rearrange(torch.gather(cdf, 1, inds_sampled), 'n1 (n2 c) -> n1 n2 c', c=2)
-    bins_g = rearrange(torch.gather(bins, 1, inds_sampled), 'n1 (n2 c) -> n1 n2 c', c=2)
+    inds_sampled = torch.stack([below, above], -1).view(N_rays, 2*N_importance)
+    cdf_g = torch.gather(cdf, 1, inds_sampled).view(N_rays, N_importance, 2)
+    bins_g = torch.gather(bins, 1, inds_sampled).view(N_rays, N_importance, 2)
 
     denom = cdf_g[...,1]-cdf_g[...,0]
     denom[denom<eps] = 1 # denom equals 0 means a bin has weight 0, in which case it will not be sampled
@@ -62,7 +61,7 @@ def render_rays(models,
                 test_time=False
                 ):
 
-    def inference(model, xyz_, z_vals, weights_only=False):
+    def inference(model, xyz_, z_vals, rays_d=None, weights_only=False):
         """
         Helper function that performs model inference
         Args:
@@ -90,9 +89,17 @@ def render_rays(models,
         batch_size = xyz_.shape[0]
         out_chunks = []
 
-        for i in range(0, batch_size, chunk):
-            # run model
-            out_chunks += [model(xyz_[i:i + chunk], sigma_only=weights_only)]
+        # run model
+        if not weights_only and rays_d is not None:
+            dir_ = torch.repeat_interleave(rays_d, repeats=N_samples_, dim=0)
+            for i in range(0, batch_size, chunk):
+                xyzdir_ = torch.cat([xyz_[i:i+chunk], dir_[i:i+chunk]], 1)
+                out_chunks += [model(xyzdir_, sigma_only=weights_only)]
+        else:
+            for i in range(0, batch_size, chunk):
+                xyzdir_ = xyz_[i:i+chunk]
+                out_chunks += [model(xyzdir_, sigma_only=weights_only)]
+
         out = torch.cat(out_chunks, 0)
 
         if weights_only:
@@ -150,9 +157,7 @@ def render_rays(models,
 
     # discretize the input rays
     # xyz_: (N_rays, N_samples_, 3) set of 3d points, one point for each depth of each ray
-    rays_o = rearrange(rays_o, 'n1 c -> n1 1 c')
-    rays_d = rearrange(rays_d, 'n1 c -> n1 1 c')
-    xyz_coarse = rays_o + rays_d * rearrange(z_vals, 'n1 n2 -> n1 n2 1')
+    xyz_coarse = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples, 3)
 
     # run coarse model
     model_coarse = models[0]
@@ -160,8 +165,12 @@ def render_rays(models,
         weights_coarse = \
             inference(model_coarse, xyz_coarse, z_vals, weights_only=True)
     else:
+        if model_coarse.input_sizes[1] > 0:
+            dir_ = rays_d
+        else:
+            dir_ = None
         rgb_coarse, depth_coarse, weights_coarse = \
-            inference(model_coarse, xyz_coarse, z_vals, weights_only=False)
+            inference(model_coarse, xyz_coarse, z_vals, rays_d=dir_, weights_only=False)
         result = {'rgb_coarse': rgb_coarse,
                   'depth_coarse': depth_coarse,
                   'opacity_coarse': weights_coarse.sum(1)}
@@ -177,12 +186,16 @@ def render_rays(models,
         z_vals, _ = torch.sort(torch.cat([z_vals, z_vals_], -1), -1)
 
         # discretize the rays for the fine model
-        xyz_fine = rays_o + rays_d * rearrange(z_vals, 'n1 n2 -> n1 n2 1')
+        xyz_fine = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples, 3)
 
         # run fine model
+        if model_coarse.input_sizes[1] > 0:
+            dir_ = rays_d
+        else:
+            dir_ = None
         model_fine = models[1]
         rgb_fine, depth_fine, weights_fine = \
-            inference(model_fine, xyz_fine, z_vals, weights_only=False)
+            inference(model_fine, xyz_fine, z_vals, rays_d=dir_, weights_only=False)
 
         result['rgb_fine'] = rgb_fine
         result['depth_fine'] = depth_fine

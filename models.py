@@ -18,17 +18,40 @@ class Siren(nn.Module):
         return torch.sin(30 * input)
 
 
-class Mapping(torch.nn.Module):
-    """
-    Positional encoding layer
-    """
-    def __init__(self, mapping_size, in_size):
-        super().__init__()
-        self.B = torch.randn((mapping_size, in_size)) * 10
+class Mapping(nn.Module):
+    def __init__(self, mapping_size, in_size, logscale=True):
+        """
+        Defines a function that embeds x to (x, sin(2^k x), cos(2^k x), ...)
+        in_channels: number of input channels (3 for both xyz and direction)
+        """
+        super(Mapping, self).__init__()
+        self.N_freqs = mapping_size
+        self.in_channels = in_size
+        self.funcs = [torch.sin, torch.cos]
+        self.out_channels = self.in_channels*(len(self.funcs)*self.N_freqs+1)
+
+        if logscale:
+            self.freq_bands = 2**torch.linspace(0, self.N_freqs-1, self.N_freqs)
+        else:
+            self.freq_bands = torch.linspace(1, 2**(self.N_freqs-1), self.N_freqs)
 
     def forward(self, x):
-        x_proj = (2. * torch.pi * x) @ self.B.t()
-        return torch.cat([torch.sin(x_proj), torch.cos(x_proj)], dim=-1)
+        """
+        Embeds x to (x, sin(2^k x), cos(2^k x), ...)
+        Different from the paper, "x" is also in the output
+        See https://github.com/bmild/nerf/issues/12
+        Inputs:
+            x: (B, self.in_channels)
+        Outputs:
+            out: (B, self.out_channels)
+        """
+        #out = [x]
+        out = []
+        for freq in self.freq_bands:
+            for func in self.funcs:
+                out += [func(freq*x)]
+
+        return torch.cat(out, -1)
 
 
 class NeRF(nn.Module):
@@ -62,7 +85,7 @@ class NeRF(nn.Module):
             self.mapping = [Mapping(map_sz, in_sz) for map_sz, in_sz in zip(mapping_sizes, input_sizes)]
             in_size = [2 * map_sz * in_sz for map_sz, in_sz in zip(mapping_sizes, input_sizes)]
         else:
-            self.mapping = Siren()
+            self.mapping = [Siren(), Siren()]
 
         # define the main network of fully connected layers, i.e. FC_NET
         fc_layers = []
@@ -104,12 +127,13 @@ class NeRF(nn.Module):
         """
 
         # compute shared features
-        input_xyz = self.mapping(input_xyz)
+        input_xyz = self.mapping[0](input_xyz)
         xyz_ = input_xyz
         for i in range(self.layers):
             if i in self.skips:
                 xyz_ = torch.cat([input_xyz, xyz_], -1)
-            xyz_ = self.fc_net[i](xyz_)
+            xyz_ = self.fc_net[2*i](xyz_)
+            xyz_ = self.fc_net[2*i + 1](xyz_)
         shared_features = xyz_
 
         # compute volume density
@@ -121,7 +145,7 @@ class NeRF(nn.Module):
         xyz_features = self.feats_from_xyz(shared_features)
         input_xyzdir = xyz_features
         # if we were using a explicit input for the viewing direction, then the previous line would be
-        # input_xyzdir = torch.cat([xyz_features, self.mapping(input_dir)], -1)
+        # input_xyzdir = torch.cat([xyz_features, self.mapping[1](input_dir)], -1)
         rgb = self.rgb_from_xyzdir(input_xyzdir)
 
         out = torch.cat([rgb, sigma], -1)

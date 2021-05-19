@@ -21,7 +21,7 @@ def get_opts():
 
     # dataset options
     parser.add_argument('--dataset_name', type=str, default='satellite',
-                        choices=['satellite'],
+                        choices=['satellite', 'blender'],
                         help='Dataset type to train/val')
     parser.add_argument('--root_dir', type=str, required=True,
                         help='Root directory of dataset')

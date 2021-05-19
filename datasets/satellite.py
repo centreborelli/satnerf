@@ -95,14 +95,13 @@ class SatelliteDataset(Dataset):
         self.img_dir = img_dir
         self.cache_dir = cache_dir
         self.split = split
-        self.img_downscale = max(2.0, int(img_downscale))
+        self.img_downscale = max(4.0, int(img_downscale))
         self.define_transforms()
         self.read_meta()
         self.white_back = False
 
     def load_data(self):
         all_rgbs, all_rays = [], []
-        image_ids, image_rpcs = [], []
         for t, json_p in enumerate(self.json_files):
 
             # read json
@@ -151,7 +150,7 @@ class SatelliteDataset(Dataset):
     def get_rgbs(self, img_path):
 
         # read rgb colors
-        img = Image.open(img_path)
+        img = Image.open(img_path).convert('RGB')
         w, h = img.size
         if self.img_downscale > 1:
             w = int(w // self.img_downscale)
@@ -198,6 +197,11 @@ class SatelliteDataset(Dataset):
                 json_files = f.read().split("\n")
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
             self.all_rays, self.all_rgbs = self.load_data()
+
+            self.all_rays[:, 0] -= torch.mean(self.all_rays[:, 0])
+            self.all_rays[:, 1] -= torch.mean(self.all_rays[:, 1])
+            self.all_rays[:, 2] -= torch.mean(self.all_rays[:, 2])
+
         elif self.split == 'val':
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
                 json_files = f.read().split("\n")

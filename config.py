@@ -2,17 +2,16 @@
 This script defines different classes with the fields that customize a NeRF architecture or a training phase
 """
 
-
-
 import dataclasses
 from omegaconf import OmegaConf
+
 
 @dataclasses.dataclass
 class TrainingConfig:
     """Sub-configuration for the training procedure."""
 
     lr: float = 5e-4            # learning rate
-    bs: int = 4096              # batch size
+    bs: int = 1024              # batch size
     workers: int = 4            # number of workers
     weight_decay: float = 0     # weight decay
     chunk: int = 32*1024        # maximum number of rays to process simultaneously, to regulate memory usage
@@ -20,7 +19,9 @@ class TrainingConfig:
     noise_std: float = 1.0      # std dev of noise added to regularize sigma
     use_disp: bool = False      # use disparity depth sampling
 
-    train_steps: int = 100000
+    #train_steps: int = 300000
+    lr_scheduler: str = 'cosine'
+    n_epochs: int = 15
 
 
 @dataclasses.dataclass
@@ -40,7 +41,7 @@ class DefaultConfig:
     # skip connections
     skips: list = dataclasses.field(default_factory=lambda: [4])
     # input sizes of the spatial (xyz) and viewing direction (dir) vectors
-    input_sizes: list = dataclasses.field(default_factory=lambda: [3, 3])
+    input_sizes: list = dataclasses.field(default_factory=lambda: [3, 0])
     # number of frequencies to use in positional encoding for xyz and dir
     mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
 

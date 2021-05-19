@@ -6,6 +6,8 @@ import numpy as np
 import cv2
 from PIL import Image
 
+from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR
+
 def get_learning_rate(optimizer):
     """
     Get learning rate
@@ -29,6 +31,23 @@ def get_parameters(models):
         # models is actually a single pytorch model
         parameters += list(models.parameters())
     return parameters
+
+def get_scheduler(optimizer, lr_scheduler, num_epochs):
+
+    #steps_per_epoch = len(self.train_dataset) / self.conf.training.bs
+    #num_steps = self.conf.training.train_steps
+    #num_epochs = int(num_steps // steps_per_epoch)
+    #final_lr = float(1e-5)
+
+    eps = 1e-8
+    if lr_scheduler == 'cosine':
+        scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=eps)
+    elif lr_scheduler == 'exponential':
+        scheduler = ExponentialLR(optimizer, gamma=0.01)
+    else:
+        raise ValueError('lr scheduler not recognized!')
+
+    return scheduler
 
 def visualize_depth(depth, cmap=cv2.COLORMAP_JET):
     """

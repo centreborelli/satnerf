@@ -85,16 +85,9 @@ class NeRF_pl(pl.LightningModule):
                                           lr=self.conf.training.lr,
                                           weight_decay=self.conf.training.weight_decay)
 
-        steps_per_epoch = len(self.train_dataset)/self.conf.training.bs
-        num_steps = self.conf.training.train_steps
-        num_epochs = int(num_steps//steps_per_epoch)
-        final_lr = float(1e-5)
-
-        #gamma = (final_lr / self.self.conf.training.lr) ** (1 / num_epochs)
-        #torch.optim.lr_scheduler.ExponentialLR(self.optimizer, gamma, last_epoch=-1, verbose=False)
-
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=num_epochs, eta_min=final_lr)
-
+        scheduler = utils.get_scheduler(self.optimizer,
+                                        self.conf.training.lr_scheduler,
+                                        self.conf.training.n_epochs)
         return [self.optimizer], [scheduler]
 
     def train_dataloader(self):
@@ -111,7 +104,7 @@ class NeRF_pl(pl.LightningModule):
                           batch_size=1,  # validate one image (H*W rays) at a time
                           pin_memory=True)
 
-    def training_step(self, batch, batch_idx):
+    def training_step(self, batch, batch_nb):
         self.log('lr', utils.get_learning_rate(self.optimizer))
 
         rays, rgbs = batch['rays'], batch['rgbs']
@@ -138,7 +131,7 @@ class NeRF_pl(pl.LightningModule):
         typ = 'fine' if 'rgb_fine' in results else 'coarse'
 
         if batch_nb == 0:
-            W, H = 1024, 1024
+            W = H = int(torch.sqrt(torch.tensor(rays.shape[0])))
             img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
             img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
             depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)

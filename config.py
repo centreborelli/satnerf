@@ -36,7 +36,7 @@ class DefaultConfig:
     mapping: bool = True      # use positional encoding
     siren: bool = False       # use Siren activation if True, otherwise use ReLU
     n_samples: int = 64       # number of coarse samples
-    n_importance: int = 128   # number of additional fine samples for the fine model
+    n_importance: int = 64    # number of additional fine samples for the fine model
 
     # skip connections
     skips: list = dataclasses.field(default_factory=lambda: [4])
@@ -95,5 +95,8 @@ def load_config(args):
     if 's-nerf' in args.config_name:
         conf.training.lr = float(1e-4)
         conf.training.bs = int(256)
+
+    if args.dataset_name == 'blender':
+        conf.input_sizes[1] = 3
 
     return conf

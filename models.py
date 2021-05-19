@@ -75,6 +75,7 @@ class NeRF(nn.Module):
         self.layers = layers
         self.skips = skips
         self.mapping = mapping
+        self.input_sizes = input_sizes
 
         # activation function
         nl = Siren() if siren else torch.nn.ReLU()
@@ -100,7 +101,7 @@ class NeRF(nn.Module):
         self.fc_net = torch.nn.Sequential(*fc_layers)  # shared 8-layer structure that takes the encoded xyz vector
 
         # FC_NET output 1: volume density
-        self.sigma_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, 1), torch.nn.ReLU(True))
+        self.sigma_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, 1), nn.Softplus())
 
         # FC_NET output 2: vector of features from the spatial coordinates
         self.feats_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, feat), nl)
@@ -110,7 +111,7 @@ class NeRF(nn.Module):
         self.rgb_from_xyzdir = torch.nn.Sequential(torch.nn.Linear(feat + in_size[1], feat // 2), nl,
                                                    torch.nn.Linear(feat // 2, 3), torch.nn.Sigmoid())
 
-    def forward(self, input_xyz, sigma_only=False):
+    def forward(self, x, input_dir=None, sigma_only=False):
         """
         Predicts the values rgb, sigma from a batch of input rays
         the input rays are represented as a set of 3d points xyz
@@ -125,6 +126,10 @@ class NeRF(nn.Module):
             else:
                 out: (B, 4) first 3 columns are rgb color, last column is volume density
         """
+        if not sigma_only and self.input_sizes[1] > 0:
+            input_xyz, input_dir = torch.split(x, [self.input_sizes[0], self.input_sizes[1]], dim=-1)
+        else:
+            input_xyz = x
 
         # compute shared features
         input_xyz = self.mapping[0](input_xyz)
@@ -143,9 +148,10 @@ class NeRF(nn.Module):
 
         # compute color
         xyz_features = self.feats_from_xyz(shared_features)
-        input_xyzdir = xyz_features
-        # if we were using a explicit input for the viewing direction, then the previous line would be
-        # input_xyzdir = torch.cat([xyz_features, self.mapping[1](input_dir)], -1)
+        if self.input_sizes[1] > 0:
+            input_xyzdir = torch.cat([xyz_features, self.mapping[1](input_dir)], -1)
+        else:
+            input_xyzdir = xyz_features
         rgb = self.rgb_from_xyzdir(input_xyzdir)
 
         out = torch.cat([rgb, sigma], -1)

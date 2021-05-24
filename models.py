@@ -54,11 +54,12 @@ class Mapping(nn.Module):
         return torch.cat(out, -1)
 
 
+# Concatenation done after the application of the layer in the NeRF framework. That's wy the skip layer is 5 instead of 4 as suggested in the paper
 class NeRF(nn.Module):
     def __init__(self,
                  layers=8, feat=100,
                  input_sizes=[3, 3],
-                 skips=[4], siren=False,
+                 skips=[5], siren=False,
                  mapping=True,
                  mapping_sizes=[10, 4]):
         """
@@ -76,22 +77,24 @@ class NeRF(nn.Module):
         self.skips = skips
         self.mapping = mapping
         self.input_sizes = input_sizes
+        self.rgb_padding = 0.001
 
         # activation function
         nl = Siren() if siren else torch.nn.ReLU()
 
-        # use positional encoding if specified, otherwise Siren initialization is used
+        # use positional encoding if specified
         in_size = input_sizes.copy()
         if mapping:
             self.mapping = [Mapping(map_sz, in_sz) for map_sz, in_sz in zip(mapping_sizes, input_sizes)]
             in_size = [2 * map_sz * in_sz for map_sz, in_sz in zip(mapping_sizes, input_sizes)]
         else:
-            self.mapping = [Siren(), Siren()]
+            self.mapping = [nn.Identity(), nn.Identity()]
 
         # define the main network of fully connected layers, i.e. FC_NET
         fc_layers = []
         fc_layers.append(torch.nn.Linear(in_size[0], feat))
         fc_layers.append(nl)
+
         for i in range(1, layers):
             if i in skips:
                 fc_layers.append(torch.nn.Linear(feat + in_size[0], feat))
@@ -104,7 +107,8 @@ class NeRF(nn.Module):
         self.sigma_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, 1), nn.Softplus())
 
         # FC_NET output 2: vector of features from the spatial coordinates
-        self.feats_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, feat), nl)
+        #self.feats_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, feat), nl)
+        self.feats_from_xyz = torch.nn.Linear(feat, feat) # No non-linearity here in the original paper
 
         # the FC_NET output 2 is concatenated to the encoded viewing direction input
         # and the resulting vector of features is used to predict the rgb color
@@ -153,6 +157,8 @@ class NeRF(nn.Module):
         else:
             input_xyzdir = xyz_features
         rgb = self.rgb_from_xyzdir(input_xyzdir)
+        # Improvement suggested by Jon Barron to help stability (same paper as soft+ suggestion)
+        rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
 
         out = torch.cat([rgb, sigma], -1)
 

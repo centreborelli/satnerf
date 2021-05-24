@@ -80,7 +80,6 @@ def rescale_RPC(rpc, alpha):
     rpc_scaled.col_offset *= float(alpha)
     return rpc_scaled
 
-
 class SatelliteDataset(Dataset):
 
     def __init__(self, root_dir, img_dir, split='train', img_downscale=1, cache_dir=None):
@@ -99,6 +98,8 @@ class SatelliteDataset(Dataset):
         self.define_transforms()
         self.read_meta()
         self.white_back = False
+        self.center = torch.tensor([0.,0.,0.])
+        self.range = torch.tensor([0.,0.,0.])
 
     def load_data(self):
         all_rgbs, all_rays = [], []
@@ -136,6 +137,7 @@ class SatelliteDataset(Dataset):
                                   np.cos(sun_az) * np.cos(sun_el),
                                   np.sin(sun_el)])
                 sun_rays_d = np.tile(sun_d, (rays.shape[0], 1))
+                # TODO concat sun_rays to rays
 
             all_rgbs += [rgbs]
             all_rays += [rays]  # (h*w, 11)
@@ -148,7 +150,6 @@ class SatelliteDataset(Dataset):
         return all_rays, all_rgbs
 
     def get_rgbs(self, img_path):
-
         # read rgb colors
         img = Image.open(img_path).convert('RGB')
         w, h = img.size
@@ -162,12 +163,11 @@ class SatelliteDataset(Dataset):
         return rgbs
 
     def get_rays(self, h, w, rpc, min_alt, max_alt):
-
         # each ray is built based on a origin 3d point + dir vector
         # in the satellite scenario we find the lower bound of the ray by localizing the image pixel at min alt
         # the upper bound of the ray is found by localizing the image pixel at max alt
         # the director vector goes results from lower_bound - upper bound
-        rows, cols = np.meshgrid(np.arange(h), np.arange(w))
+        cols, rows = np.meshgrid(np.arange(h), np.arange(w))
         rows = rows.reshape((-1,))
         cols = cols.reshape((-1,))
         min_alts = float(min_alt) * np.ones(cols.shape)
@@ -192,15 +192,34 @@ class SatelliteDataset(Dataset):
         return rays
 
     def read_meta(self):
+        # Load scene infos (center + range)
+        with open(os.path.join(self.json_dir, "loc.json")) as f:
+            d = json.load(f)
+            self.center = torch.tensor([float(d['centerX']), float(d['centerY']), float(d['centerZ'])])
+            #self.range = torch.tensor([float(d['rangeX']), float(d['rangeY']), float(d['rangeZ'])])
+            self.range = torch.tensor([float(d['range'])])
+
         if self.split == "train":
             with open(os.path.join(self.json_dir, "train.txt"), "r") as f:
-                json_files = f.read().split("\n")
+                json_files = f.read().split("\n")[:-1]
+            print(json_files)
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
             self.all_rays, self.all_rgbs = self.load_data()
 
-            self.all_rays[:, 0] -= torch.mean(self.all_rays[:, 0])
-            self.all_rays[:, 1] -= torch.mean(self.all_rays[:, 1])
-            self.all_rays[:, 2] -= torch.mean(self.all_rays[:, 2])
+            self.all_rays[:, 0] -= self.center[0]
+            self.all_rays[:, 1] -= self.center[1]
+            self.all_rays[:, 2] -= self.center[2]
+            #self.all_rays[:, 3] /= self.range[0]
+            #self.all_rays[:, 4] /= self.range[1]
+            #self.all_rays[:, 5] /= self.range[2]
+            #self.all_rays[:, 0] /= self.range[0]
+            #self.all_rays[:, 1] /= self.range[1]
+            #self.all_rays[:, 2] /= self.range[2]
+            self.all_rays[:, 0] /= self.range
+            self.all_rays[:, 1] /= self.range
+            self.all_rays[:, 2] /= self.range
+            self.all_rays[:, 6] /= self.range
+            self.all_rays[:, 7] /= self.range
 
         elif self.split == 'val':
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
@@ -226,6 +245,13 @@ class SatelliteDataset(Dataset):
         else:
             json_p = self.json_files[idx]
 
+            # TODO find out why self.center and self.range are by default here and not the one loaded previously
+            with open(os.path.join(self.json_dir, "loc.json")) as f:
+                d = json.load(f)
+                self.center = torch.tensor([float(d['centerX']), float(d['centerY']), float(d['centerZ'])])
+                #self.range = torch.tensor([float(d['rangeX']), float(d['rangeY']), float(d['rangeZ'])])
+                self.range = torch.tensor([float(d['range'])])
+
             with open(json_p) as f:
                 d = json.load(f)
             img_p = os.path.join(self.img_dir, d["img"])
@@ -242,6 +268,21 @@ class SatelliteDataset(Dataset):
                 rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
                 min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
                 rays = self.get_rays(h, w, rpc, min_alt, max_alt)
+
+                rays[:, 0] -= self.center[0]
+                rays[:, 1] -= self.center[1]
+                rays[:, 2] -= self.center[2]
+                #rays[:, 3] /= self.range[0]
+                #rays[:, 4] /= self.range[1]
+                #rays[:, 5] /= self.range[2]
+                #rays[:, 0] /= self.range[0]
+                #rays[:, 1] /= self.range[1]
+                #rays[:, 2] /= self.range[2]
+                rays[:, 0] /= self.range
+                rays[:, 1] /= self.range
+                rays[:, 2] /= self.range
+                rays[:, 6] /= self.range
+                rays[:, 7] /= self.range
 
                 if self.cache_dir is not None:
                     os.makedirs(os.path.dirname(cache_path), exist_ok=True)

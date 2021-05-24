@@ -6,7 +6,7 @@ import numpy as np
 import cv2
 from PIL import Image
 
-from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, MultiStepLR
 
 def get_learning_rate(optimizer):
     """
@@ -44,6 +44,9 @@ def get_scheduler(optimizer, lr_scheduler, num_epochs):
         scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=eps)
     elif lr_scheduler == 'exponential':
         scheduler = ExponentialLR(optimizer, gamma=0.01)
+    elif lr_scheduler == 'step':
+        scheduler = MultiStepLR(optimizer, milestones=[2,4,8], gamma=0.5)
+        #scheduler = MultiStepLR(optimizer, milestones=[50,100,200], gamma=0.5)
     else:
         raise ValueError('lr scheduler not recognized!')
 

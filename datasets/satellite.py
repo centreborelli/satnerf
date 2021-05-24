@@ -172,11 +172,11 @@ class SatelliteDataset(Dataset):
         cols = cols.reshape((-1,))
         min_alts = float(min_alt) * np.ones(cols.shape)
         max_alts = float(max_alt) * np.ones(cols.shape)
-        lons, lats = rpc.localization(cols, rows, min_alts)
-        x_near, y_near, z_near = latlon_to_ecef_custom(lats, lons, min_alts)
-        xyz_near = np.vstack([x_near, y_near, z_near]).T
         lons, lats = rpc.localization(cols, rows, max_alts)
-        x_far, y_far, z_far = latlon_to_ecef_custom(lats, lons, max_alts)
+        x_near, y_near, z_near = latlon_to_ecef_custom(lats, lons, max_alts)
+        xyz_near = np.vstack([x_near, y_near, z_near]).T
+        lons, lats = rpc.localization(cols, rows, min_alts)
+        x_far, y_far, z_far = latlon_to_ecef_custom(lats, lons, min_alts)
         xyz_far = np.vstack([x_far, y_far, z_far]).T
         d = xyz_far - xyz_near
 
@@ -223,7 +223,8 @@ class SatelliteDataset(Dataset):
 
         elif self.split == 'val':
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
-                json_files = f.read().split("\n")
+                json_files = f.read().split("\n")[:-1]
+                print(json_files)
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
         else:
             pass

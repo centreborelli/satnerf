@@ -9,6 +9,8 @@ jupyter
 einops
 torch-optimizer
 rpcm @ git+https://github.com/cmla/rpcm.git@localization-origin
+plyflatten
+utm
 
 # for mesh
 PyMCubes

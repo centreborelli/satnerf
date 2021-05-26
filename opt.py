@@ -3,6 +3,7 @@ This script defines the input parameters that can be customized from the command
 """
 
 import argparse
+import datetime
 
 def get_opts():
     parser = argparse.ArgumentParser()
@@ -12,7 +13,7 @@ def get_opts():
     parser.add_argument("--logs_dir", type=str, default="logs",
                         help="directory to save experiment logs.")
     parser.add_argument("--config_name", type=str, default="s-nerf_basic",
-                        choices=['nerf', 's-nerf_basic', 's-nerf_full'],
+                        choices=['nerf', 's-nerf_basic'],
                         help="NeRF training and model configuration")
     parser.add_argument("--ckpt_path", type=str, default=None,
                         help="Pretrained checkpoint path to load")
@@ -30,4 +31,13 @@ def get_opts():
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='Directory where cache for the current dataset is found')
 
-    return parser.parse_args()
+    parser.add_argument('--max_steps', type=int, default=100000,
+                        help='Maximum iteration steps for training')
+
+    args = parser.parse_args()
+
+    exp_id = args.config_name if args.exp_name is None else args.exp_name
+    args.exp_name = "{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S"), exp_id)
+
+
+    return args

@@ -348,7 +348,7 @@ class SatelliteDataset(Dataset):
         xyz[:, 1] += self.center[1]
         xyz[:, 2] += self.center[2]
 
-        # convert to lat-lon and then to utm
+        # convert to lat-lon-alt
         xyz = xyz.data.numpy()
         lats, lons, alts = ecef_to_latlon_custom(xyz[:, 0], xyz[:, 1], xyz[:, 2])
         return lats, lons, alts

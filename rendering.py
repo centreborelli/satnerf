@@ -58,21 +58,24 @@ def render_rays(models,
                 noise_std=1,
                 chunk=1024*32,
                 white_back=False,
-                test_time=False
+                test_time=False,
+                variant="classic"
                 ):
 
-    def inference(model, xyz_, z_vals, rays_d=None, weights_only=False):
+    def inference(model, xyz_, z_vals, rays_d=None, sun_d=None, weights_only=False, variant="classic"):
         """
         Helper function that performs model inference
         Args:
             model: NeRF model (coarse or fine)
-            embedding_xyz: embedding module for xyz
             xyz_: (N_rays, N_samples_, 3) sampled positions
                   N_samples_ is the number of sampled points in each ray;
                              = N_samples for coarse model
                              = N_samples+N_importance for fine model
             z_vals: (N_rays, N_samples_) depths of the sampled positions
+            rays_d: (N_rays, 3) direction vectors of the rays
+            sun_d: (N_rays, 3) sun direction vectors associated to the rays
             weights_only: do inference on sigma only or not
+            variant: NeRF variant that is used  (classic or s-nerf)
         Returns:
             if weights_only:
                 weights: (N_rays, N_samples_): weights of each sample
@@ -85,31 +88,37 @@ def render_rays(models,
         N_samples_ = xyz_.shape[1]
         xyz_ = xyz_.view(-1, 3)  # (N_rays*N_samples_, 3)
 
+        # check if the ray directions and the sun ray directions are given as input
+        # these inputs may be used or not depending on the nerf variant
+        if rays_d is not None:
+            ray_dirs_ = torch.repeat_interleave(rays_d, repeats=N_samples_, dim=0)
+        if sun_d is not None:
+            sun_dirs_ = torch.repeat_interleave(sun_d, repeats=N_samples_, dim=0)
+
         # the input batch is split in chunks to avoid possible problems with memory usage
         batch_size = xyz_.shape[0]
         out_chunks = []
 
         # run model
-        if not weights_only and rays_d is not None:
-            dir_ = torch.repeat_interleave(rays_d, repeats=N_samples_, dim=0)
-            for i in range(0, batch_size, chunk):
-                xyzdir_ = torch.cat([xyz_[i:i+chunk], dir_[i:i+chunk]], 1)
-                out_chunks += [model(xyzdir_, sigma_only=weights_only)]
-        else:
-            for i in range(0, batch_size, chunk):
-                xyzdir_ = xyz_[i:i+chunk]
-                out_chunks += [model(xyzdir_, sigma_only=weights_only)]
-
+        for i in range(0, batch_size, chunk):
+            out_chunks += [model(xyz_[i:i+chunk],
+                                 input_dir=ray_dirs_[i:i+chunk] if rays_d is not None else None,
+                                 input_sun_dir=sun_dirs_[i:i+chunk] if sun_d is not None else None,
+                                 sigma_only=weights_only)]
         out = torch.cat(out_chunks, 0)
 
         if weights_only:
             # predict only sigma
             sigmas = out.view(N_rays, N_samples_)
         else:
-            # predict both sigma and color
-            rgbsigma = out.view(N_rays, N_samples_, 4)
-            rgbs = rgbsigma[..., :3]  # (N_rays, N_samples_, 3)
-            sigmas = rgbsigma[..., 3]  # (N_rays, N_samples_)
+            # predict all
+            channels = model.outputs_per_variant[variant]
+            out = out.view(N_rays, N_samples_, channels)
+            rgbs = out[..., :3]  # (N_rays, N_samples_, 3)
+            sigmas = out[..., 3]  # (N_rays, N_samples_)
+            if variant == "s-nerf":
+                sun_v = out[..., 4]  # (N_rays, N_samples_)
+                sky_rgb = out[..., 5:8]  # (N_rays, N_samples_, 3)
 
         # define deltas, i.e. the length between the points in which the ray is discretized
         deltas = z_vals[:, 1:] - z_vals[:, :-1]  # (N_rays, N_samples_-1)
@@ -121,25 +130,39 @@ def render_rays(models,
         alphas = 1 - torch.exp(-deltas * torch.relu(sigmas + noise))  # (N_rays, N_samples_)
         alphas_shifted = \
             torch.cat([torch.ones_like(alphas[:, :1]), 1 - alphas + 1e-10], -1)  # [1, a1, a2, ...]
-        weights = \
-            alphas * torch.cumprod(alphas_shifted, -1)[:, :-1]  # (N_rays, N_samples_)
+        transparency = torch.cumprod(alphas_shifted, -1)[:, :-1]  # T in the paper
+        weights = alphas * transparency # (N_rays, N_samples_)
         weights_sum = weights.sum(1)  # (N_rays), the accumulated opacity along the rays
         # equals "1 - (1-a1)(1-a2)...(1-an)" mathematically
         if weights_only:
             return weights
 
         # compute final weighted outputs
-        rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)  # (N_rays, 3)
-        depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
+        if variant == "s-nerf":
+            # equation 2 of the s-nerf paper
+            white_source = torch.ones_like(rgbs)
+            irradiance = white_source + (1 - sun_v.view(N_rays, N_samples_, 1)) * sky_rgb
+            rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs * irradiance, -2)  # (N_rays, 3)
+            depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
+            return rgb_final, depth_final, weights, transparency, sun_v
+        else:
+            # classic NeRF outputs
+            rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)  # (N_rays, 3)
+            depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
 
         if white_back:
             rgb_final = rgb_final + 1 - weights_sum.unsqueeze(-1)
 
         return rgb_final, depth_final, weights
 
-    # sample depth points
-    rays_o, rays_d = rays[:, 0:3],  rays[:, 3:6]
-    near, far = rays[:, 6:7], rays[:, 7:8]
+    # get rays
+    rays_o, rays_d, near, far = rays[:, 0:3],  rays[:, 3:6], rays[:, 6:7], rays[:, 7:8]
+    # keep rays direction only if it is part of the inputs of the model
+    rays_d_ = rays_d if models[0].input_sizes[1] > 0 else None
+    # sun rays direction is used by the s-nerf vairant
+    sun_d_ = rays[:, 8:] if variant == "s-nerf" else None
+
+    # sample depths for coarse model
     z_steps = torch.linspace(0, 1, N_samples, device=rays.device)
     if not use_disp:  # use linear sampling in depth space
         z_vals = near * (1-z_steps) + far * z_steps
@@ -155,50 +178,60 @@ def render_rays(models,
         perturb_rand = perturb * torch.rand_like(z_vals)
         z_vals = lower + (upper - lower) * perturb_rand
 
-    # discretize the input rays
-    # xyz_: (N_rays, N_samples_, 3) set of 3d points, one point for each depth of each ray
-    xyz_coarse = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples, 3)
+    # discretize rays into a set of 3d points (N_rays, N_samples_, 3), one point for each depth of each ray
+    xyz_coarse = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
 
     # run coarse model
     model_coarse = models[0]
     if test_time:
         weights_coarse = \
-            inference(model_coarse, xyz_coarse, z_vals, weights_only=True)
+            inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=True)
     else:
-        if model_coarse.input_sizes[1] > 0:
-            dir_ = rays_d
+        if variant == "s-nerf":
+            rgb_coarse, depth_coarse, weights_coarse, transparency_coarse, sun_visibility_coarse = \
+                inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
+            result = {'rgb_coarse': rgb_coarse,
+                      'depth_coarse': depth_coarse,
+                      'opacity_coarse': weights_coarse.sum(1),
+                      'weights_coarse': weights_coarse,
+                      'transparency_coarse': transparency_coarse,
+                      'sun_visibility_coarse': sun_visibility_coarse}
         else:
-            dir_ = None
-        rgb_coarse, depth_coarse, weights_coarse = \
-            inference(model_coarse, xyz_coarse, z_vals, rays_d=dir_, weights_only=False)
-        result = {'rgb_coarse': rgb_coarse,
-                  'depth_coarse': depth_coarse,
-                  'opacity_coarse': weights_coarse.sum(1)}
+            rgb_coarse, depth_coarse, weights_coarse = \
+                inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
+            result = {'rgb_coarse': rgb_coarse,
+                      'depth_coarse': depth_coarse,
+                      'opacity_coarse': weights_coarse.sum(1)}
 
     # run fine model
     if N_importance > 0:
 
-        # sample altitudes for fine model
+        # sample depths for fine model
         z_vals_mid = 0.5 * (z_vals[:, :-1] + z_vals[:, 1:])  # (N_rays, N_samples-1) interval mid points
         z_vals_ = sample_pdf(z_vals_mid, weights_coarse[:, 1:-1],
                              N_importance, det=(perturb == 0)).detach()
         # detach so that grad doesn't propogate to weights_coarse from here
         z_vals, _ = torch.sort(torch.cat([z_vals, z_vals_], -1), -1)
 
-        # discretize the rays for the fine model
+        # discretize rays for fine model
         xyz_fine = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples, 3)
 
         # run fine model
-        if model_coarse.input_sizes[1] > 0:
-            dir_ = rays_d
-        else:
-            dir_ = None
         model_fine = models[1]
-        rgb_fine, depth_fine, weights_fine = \
-            inference(model_fine, xyz_fine, z_vals, rays_d=dir_, weights_only=False)
+        if variant == "s-nerf":
+            rgb_fine, depth_fine, weights_fine, transparency_fine, sun_visibility_fine = \
+                inference(model_fine, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
+            result = {'rgb_fine': rgb_fine,
+                      'depth_fine': depth_fine,
+                      'opacity_fine': weights_fine.sum(1),
+                      'weights_fine': weights_fine,
+                      'transparency_fine': transparency_fine,
+                      'sun_visibility_fine': sun_visibility_fine}
+        else:
+            rgb_fine, depth_fine, weights_fine = \
+                inference(model_fine, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
+            result = {'rgb_fine': rgb_fine,
+                      'depth_fine': depth_fine,
+                      'opacity_fine': weights_fine.sum(1)}
 
-        result['rgb_fine'] = rgb_fine
-        result['depth_fine'] = depth_fine
-        result['opacity_fine'] = weights_fine.sum(1)
-
-        return result
+    return result

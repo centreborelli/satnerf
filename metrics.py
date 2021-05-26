@@ -18,12 +18,31 @@ class ColorLoss(torch.nn.Module):
 
         return self.coef * loss
 
+class SNerfLoss(torch.nn.Module):
+    def __init__(self, coef=1):
+        super().__init__()
+        self.coef = coef
+        self.loss = torch.nn.MSELoss(reduction='mean')
+        self.lambda_s = 0.00
+
+    def forward(self, inputs, targets):
+        term1 = self.loss(inputs['rgb_coarse'], targets)
+        term2 = torch.square(inputs['transparency_coarse'] - inputs['sun_visibility_coarse']).sum(1)
+        term3 = 1 - (inputs['weights_coarse'] * inputs['sun_visibility_coarse']).sum(1)
+        loss = term1 + self.lambda_s * torch.sum(term2 + term3)
+
+        if 'rgb_fine' in inputs:
+            term1 = self.loss(inputs['rgb_fine'], targets)
+            term2 = torch.square(inputs['transparency_fine'] - inputs['sun_visibility_fine']).sum(1)
+            term3 = 1 - (inputs['weights_fine'] * inputs['sun_visibility_fine']).sum(1)
+            loss += term1 + self.lambda_s * torch.sum(term2 + term3)
+
+        return self.coef * loss
 
 def load_loss(args):
 
     loss_dict = {'nerf': ColorLoss,
-                 's-nerf_basic': ColorLoss,
-                 's-nerf_full': ColorLoss}
+                 's-nerf_basic': SNerfLoss}
 
     loss_function = loss_dict[args.config_name]()
     return loss_function

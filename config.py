@@ -20,17 +20,14 @@ class TrainingConfig:
     #use_disp: bool = True       # use disparity depth sampling
     use_disp: bool = False       # True is buggy with satellite FIXME
 
-    #train_steps: int = 300000
-    #lr_scheduler: str = 'cosine'
-    lr_scheduler: str = 'step'
-    n_epochs: int = 15
+    lr_scheduler: str = "step"
 
 
 @dataclasses.dataclass
 class DefaultConfig:
     """Default NeRF configuration."""
 
-    name: str = 'nerf'
+    name: str = "nerf"
     training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
 
     layers: int = 8           # number of fully connected layers in the shared structure
@@ -40,6 +37,7 @@ class DefaultConfig:
     n_samples: int = 64       # number of coarse samples
     #n_importance: int = 64    # number of additional fine samples for the fine model
     n_importance: int = 0    # number of additional fine samples for the fine model
+    variant: str = "classic"
 
     # skip connections
     skips: list = dataclasses.field(default_factory=lambda: [4])
@@ -53,7 +51,7 @@ class DefaultConfig:
 class SNerfBasicConfig:
     """S-NeRF configuration."""
 
-    name: str = 's-nerf_basic'
+    name: str = "s-nerf_basic"
     training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
 
     layers: int = 8
@@ -61,45 +59,24 @@ class SNerfBasicConfig:
     mapping: bool = True
     siren: bool = True
     n_samples: int = 64
-    n_importance: int = 64
+    n_importance: int = 0
+    variant: str = "s-nerf"
     skips: list = dataclasses.field(default_factory=lambda: [4])
-    input_sizes: list = dataclasses.field(default_factory=lambda: [3, 0])
-    mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
-
-
-@dataclasses.dataclass
-class SNerfFullConfig:
-    """S-NeRF configuration."""
-
-    #TODO
-
-    name: str = 's-nerf_full'
-    training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
-
-    layers: int = 8
-    feat: int = 100
-    mapping: bool = False
-    siren: bool = True
-    n_samples: int = 64
-    n_importance: int = 64
-    skips: list = dataclasses.field(default_factory=lambda: [])
     input_sizes: list = dataclasses.field(default_factory=lambda: [3, 0])
     mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
 
 
 def load_config(args):
 
-    config_dict = {'nerf': DefaultConfig,
-                   's-nerf_basic': SNerfBasicConfig,
-                   's-nerf_full': SNerfFullConfig}
+    config_dict = {"nerf": DefaultConfig, "s-nerf": SNerfBasicConfig}
 
     conf = OmegaConf.structured(config_dict[args.config_name])
 
-    #if 's-nerf' in args.config_name:
-    #    conf.training.lr = float(1e-2)
-    #    conf.training.bs = int(256)
+    if "s-nerf" in args.config_name:
+        conf.training.lr = float(1e-4)
+        conf.training.bs = int(256)
 
-    if args.dataset_name == 'blender':
+    if args.dataset_name == "blender":
         conf.input_sizes[1] = 3
 
     return conf

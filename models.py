@@ -11,6 +11,7 @@ class Siren(nn.Module):
     """
     Siren layer
     """
+
     def __init__(self):
         super().__init__()
 
@@ -59,9 +60,10 @@ class NeRF(nn.Module):
     def __init__(self,
                  layers=8, feat=100,
                  input_sizes=[3, 3],
-                 skips=[5], siren=False,
+                 skips=[4], siren=False,
                  mapping=True,
-                 mapping_sizes=[10, 4]):
+                 mapping_sizes=[10, 4],
+                 variant="classic"):
         """
         layers: integer, number of layers for density (sigma) encoder
         feat: integer, number of hidden units in each layer
@@ -78,6 +80,10 @@ class NeRF(nn.Module):
         self.mapping = mapping
         self.input_sizes = input_sizes
         self.rgb_padding = 0.001
+        self.outputs_per_variant = {
+            "classic": 4,  # r, g, b (3) + sigma (1)
+            "s-nerf": 8,  # r, g, b (3) + sigma (1) + sun visibility (1) + r, g, b from sky color (3)
+        }
 
         # activation function
         nl = Siren() if siren else torch.nn.ReLU()
@@ -107,7 +113,6 @@ class NeRF(nn.Module):
         self.sigma_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, 1), nn.Softplus())
 
         # FC_NET output 2: vector of features from the spatial coordinates
-        #self.feats_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, feat), nl)
         self.feats_from_xyz = torch.nn.Linear(feat, feat) # No non-linearity here in the original paper
 
         # the FC_NET output 2 is concatenated to the encoded viewing direction input
@@ -115,7 +120,28 @@ class NeRF(nn.Module):
         self.rgb_from_xyzdir = torch.nn.Sequential(torch.nn.Linear(feat + in_size[1], feat // 2), nl,
                                                    torch.nn.Linear(feat // 2, 3), torch.nn.Sigmoid())
 
-    def forward(self, x, input_dir=None, sigma_only=False):
+        # Shadow-NeRF (s-nerf) additional layers
+        self.variant = variant
+        if self.variant == "s-nerf":
+            sun_dir_in_size = 3
+            sun_v_layers = []
+            sun_v_layers.append(torch.nn.Linear(feat + sun_dir_in_size, feat // 2))
+            sun_v_layers.append(nl)
+            for i in range(1, 3):
+                sun_v_layers.append(torch.nn.Linear(feat // 2, feat // 2))
+                sun_v_layers.append(nl)
+            sun_v_layers.append(torch.nn.Linear(feat // 2, 1))
+            sun_v_layers.append(nn.Softplus())
+            self.sun_v_net = torch.nn.Sequential(*sun_v_layers)
+
+            self.sky_color = torch.nn.Sequential(
+                torch.nn.Linear(sun_dir_in_size, feat // 2),
+                torch.nn.ReLU(),
+                torch.nn.Linear(feat // 2, 3),
+                torch.nn.Sigmoid(),
+            )
+
+    def forward(self, input_xyz, input_dir=None, input_sun_dir=None, sigma_only=False):
         """
         Predicts the values rgb, sigma from a batch of input rays
         the input rays are represented as a set of 3d points xyz
@@ -130,10 +156,6 @@ class NeRF(nn.Module):
             else:
                 out: (B, 4) first 3 columns are rgb color, last column is volume density
         """
-        if not sigma_only and self.input_sizes[1] > 0:
-            input_xyz, input_dir = torch.split(x, [self.input_sizes[0], self.input_sizes[1]], dim=-1)
-        else:
-            input_xyz = x
 
         # compute shared features
         input_xyz = self.mapping[0](input_xyz)
@@ -161,5 +183,11 @@ class NeRF(nn.Module):
         rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
 
         out = torch.cat([rgb, sigma], -1)
+
+        if self.variant == "s-nerf":
+            input_sun_v_net = torch.cat([xyz_features, input_sun_dir], -1)
+            sun_v = self.sun_v_net(input_sun_v_net)
+            sky_color = self.sky_color(input_sun_dir)
+            out = torch.cat([rgb, sigma, sun_v, sky_color], -1)
 
         return out

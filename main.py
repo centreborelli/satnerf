@@ -117,8 +117,8 @@ class NeRF_pl(pl.LightningModule):
             psnr_ = metrics.psnr(results[f'rgb_{typ}'], rgbs)
             self.log('train/psnr', psnr_)
 
-        return {'loss': loss,
-                'progress_bar': {'train_psnr': psnr_}}
+        self.log('train_psnr', psnr_, on_step=True, on_epoch=True, prog_bar=True)
+        return {'loss': loss}
 
     def validation_step(self, batch, batch_nb):
 
@@ -130,14 +130,21 @@ class NeRF_pl(pl.LightningModule):
         self.log('val/loss', loss)
         typ = 'fine' if 'rgb_fine' in results else 'coarse'
 
-        if batch_nb == 0:
-            W = H = int(torch.sqrt(torch.tensor(rays.shape[0])))
-            img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
-            img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
-            depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)
-            stack = torch.stack([img_gt, img, depth])  # (3, 3, H, W)
-            self.logger.experiment.add_images('val/GT_pred_depth',
-                                              stack, self.global_step)
+        #if batch_nb == 0:
+        #    W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
+        #    img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
+        #    img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
+        #    depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)
+        #    stack = torch.stack([img_gt, img, depth])  # (3, 3, H, W)
+        #    self.logger.experiment.add_images('val/GT_pred_depth',
+        #                                      stack, self.global_step)
+        W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
+        img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
+        img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
+        depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)
+        stack = torch.stack([img_gt, img, depth])  # (3, 3, H, W)
+        self.logger.experiment.add_images('val_'+str(batch_nb)+'/GT_pred_depth',
+                                          stack, self.global_step)
 
         psnr_ = metrics.psnr(results[f'rgb_{typ}'], rgbs)
         self.log('val/psnr', psnr_)
@@ -164,8 +171,8 @@ def main():
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,
-                         gpus=1,
-                         auto_select_gpus=True,
+                         gpus=[1],
+                         auto_select_gpus=False,
                          deterministic=True,
                          benchmark=True,
                          weights_summary=None,

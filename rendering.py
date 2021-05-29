@@ -201,4 +201,4 @@ def render_rays(models,
         result['depth_fine'] = depth_fine
         result['opacity_fine'] = weights_fine.sum(1)
 
-        return result
+    return result

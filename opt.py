@@ -12,8 +12,8 @@ def get_opts():
                         help="directory to save model checkpoints.")
     parser.add_argument("--logs_dir", type=str, default="logs",
                         help="directory to save experiment logs.")
-    parser.add_argument("--config_name", type=str, default="s-nerf_basic",
-                        choices=['nerf', 's-nerf_basic'],
+    parser.add_argument("--config_name", type=str, default="s-nerf",
+                        choices=['nerf', 's-nerf'],
                         help="NeRF training and model configuration")
     parser.add_argument("--ckpt_path", type=str, default=None,
                         help="Pretrained checkpoint path to load")

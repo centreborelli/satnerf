@@ -5,8 +5,11 @@ import torchvision.transforms as T
 import numpy as np
 import cv2
 from PIL import Image
+import os
+import rasterio
+import torch
 
-from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, MultiStepLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, MultiStepLR, StepLR
 
 def get_learning_rate(optimizer):
     """
@@ -34,19 +37,17 @@ def get_parameters(models):
 
 def get_scheduler(optimizer, lr_scheduler, num_epochs):
 
-    #steps_per_epoch = len(self.train_dataset) / self.conf.training.bs
-    #num_steps = self.conf.training.train_steps
-    #num_epochs = int(num_steps // steps_per_epoch)
-    #final_lr = float(1e-5)
-
     eps = 1e-8
     if lr_scheduler == 'cosine':
         scheduler = CosineAnnealingLR(optimizer, T_max=num_epochs, eta_min=eps)
     elif lr_scheduler == 'exponential':
         scheduler = ExponentialLR(optimizer, gamma=0.01)
-    elif lr_scheduler == 'step':
+    elif lr_scheduler == 'multistep':
         scheduler = MultiStepLR(optimizer, milestones=[2,4,8], gamma=0.5)
         #scheduler = MultiStepLR(optimizer, milestones=[50,100,200], gamma=0.5)
+    elif lr_scheduler == 'step':
+        gamma = 0.7
+        scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
     else:
         raise ValueError('lr scheduler not recognized!')
 
@@ -65,3 +66,24 @@ def visualize_depth(depth, cmap=cv2.COLORMAP_JET):
     x_ = Image.fromarray(cv2.applyColorMap(x, cmap))
     x_ = T.ToTensor()(x_) # (3, H, W)
     return x_
+
+def save_output_image(input, output_path, source_path):
+    """
+    input: (D, H, W) where D is the number of channels (3 for rgb, 1 for grayscale)
+           can be a pytorch tensor or a numpy array
+    """
+    # convert input to numpy array float32
+    if torch.is_tensor(input):
+        im_np = input.type(torch.FloatTensor).cpu().numpy()
+    else:
+        im_np = input.astype(np.float32)
+
+    os.makedirs(os.path.dirname(output_path), exist_ok=True)
+    with rasterio.open(source_path, 'r') as src:
+        profile = src.profile
+        profile["dtype"] = rasterio.float32
+        profile["height"] = im_np.shape[1]
+        profile["width"] = im_np.shape[2]
+        profile["count"] = im_np.shape[0]
+        with rasterio.open(output_path, 'w', **profile) as dst:
+            dst.write(im_np)

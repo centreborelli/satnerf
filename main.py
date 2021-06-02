@@ -15,17 +15,20 @@ from rendering import render_rays
 from models import NeRF
 import utils
 import metrics
-import datetime
+
 
 class NeRF_pl(pl.LightningModule):
     """NeRF network"""
+
     def __init__(self, args):
         super().__init__()
         self.args = args
         self.conf = load_config(args)
         self.loss = load_loss(args)
         self.define_models()
-        #self.save_hyperparameters('lr', 'train/loss', 'train/psnr')
+        self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
+        self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
+        self.train_steps = 0
 
     def define_models(self):
 
@@ -60,13 +63,13 @@ class NeRF_pl(pl.LightningModule):
             rendered_ray_chunks = \
                 render_rays(self.models,
                             rays[i:i + chunk_size],
-                            self.conf.n_samples,
-                            self.conf.n_importance,
-                            self.conf.training.use_disp,
-                            self.conf.training.perturb,
-                            self.conf.training.noise_std,
-                            chunk_size
-                            )
+                            N_samples=self.conf.n_samples,
+                            N_importance=self.conf.n_importance,
+                            use_disp=self.conf.training.use_disp,
+                            perturb=self.conf.training.perturb,
+                            noise_std=self.conf.training.noise_std,
+                            chunk=chunk_size,
+                            variant=self.conf.variant)
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
 
@@ -75,8 +78,8 @@ class NeRF_pl(pl.LightningModule):
         return results
 
     def prepare_data(self):
-        self.train_dataset = load_dataset(self.args, split='train')
-        self.val_dataset = load_dataset(self.args, split='val')
+        self.train_dataset = load_dataset(self.args, split="train")
+        self.val_dataset = load_dataset(self.args, split="val")
 
     def configure_optimizers(self):
 
@@ -85,9 +88,9 @@ class NeRF_pl(pl.LightningModule):
                                           lr=self.conf.training.lr,
                                           weight_decay=self.conf.training.weight_decay)
 
-        scheduler = utils.get_scheduler(self.optimizer,
-                                        self.conf.training.lr_scheduler,
-                                        self.conf.training.n_epochs)
+        scheduler = utils.get_scheduler(optimizer=self.optimizer,
+                                        lr_scheduler=self.conf.training.lr_scheduler,
+                                        num_epochs=self.get_current_epoch(self.args.max_steps))
         return [self.optimizer], [scheduler]
 
     def train_dataloader(self):
@@ -105,30 +108,31 @@ class NeRF_pl(pl.LightningModule):
                           pin_memory=True)
 
     def training_step(self, batch, batch_nb):
-        self.log('lr', utils.get_learning_rate(self.optimizer))
+        self.log("lr", utils.get_learning_rate(self.optimizer))
+        self.train_steps += 1
 
-        rays, rgbs = batch['rays'], batch['rgbs']
+        rays, rgbs = batch["rays"], batch["rgbs"]
         results = self(rays)
         loss = self.loss(results, rgbs)
-        self.log('train/loss', loss)
-        typ = 'fine' if 'rgb_fine' in results else 'coarse'
+        self.log("train/loss", loss)
+        typ = "fine" if "rgb_fine" in results else "coarse"
 
         with torch.no_grad():
-            psnr_ = metrics.psnr(results[f'rgb_{typ}'], rgbs)
-            self.log('train/psnr', psnr_)
+            psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
+            self.log("train/psnr", psnr_)
 
         self.log('train_psnr', psnr_, on_step=True, on_epoch=True, prog_bar=True)
         return {'loss': loss}
 
     def validation_step(self, batch, batch_nb):
 
-        rays, rgbs = batch['rays'], batch['rgbs']
+        rays, rgbs = batch["rays"], batch["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
         results = self(rays)
         loss = self.loss(results, rgbs)
-        self.log('val/loss', loss)
-        typ = 'fine' if 'rgb_fine' in results else 'coarse'
+        self.log("val/loss", loss)
+        typ = "fine" if "rgb_fine" in results else "coarse"
 
         #if batch_nb == 0:
         #    W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
@@ -146,28 +150,48 @@ class NeRF_pl(pl.LightningModule):
         self.logger.experiment.add_images('val_'+str(batch_nb)+'/GT_pred_depth',
                                           stack, self.global_step)
 
-        psnr_ = metrics.psnr(results[f'rgb_{typ}'], rgbs)
-        self.log('val/psnr', psnr_)
+            if self.args.dataset_name == 'satellite':
+                # save some images to disk for a more detailed visualization
+                epoch = self.get_current_epoch(self.train_steps)
+                src_path = batch["src_path"][0]
+                src_id = batch["src_id"][0]
+                out_path = "{}/depth/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
+                depth = results[f"depth_{typ}"]
+                # depth (altitudes) image
+                _, _, alts = self.val_dataset.get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
+                utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
+                # rgb image
+                out_path = "{}/rgb/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
+                utils.save_output_image(img, out_path, src_path)
 
-        return {'loss': loss}
+                roi_txt = "/home/roger/Datasets/DFC2019/Track3-Truth/{}_DSM.txt".format(src_id[:7])
+                out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
+                dsm = self.train_dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(),
+                                                                      dsm_path=out_path, roi_txt=roi_txt)
+
+        psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
+        self.log("val/psnr", psnr_)
+
+        return {"loss": loss}
+
+    def get_current_epoch(self, train_step):
+        return int(train_step // (len(self.train_dataset) // self.conf.training.bs))
+
 
 def main():
 
     args = get_opts()
     system = NeRF_pl(args)
 
-    exp_id = args.config_name if args.exp_name is None else args.exp_name
-    exp_name = "{}_{}".format(exp_id, datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S"))
+    logger = pl.loggers.TensorBoardLogger(save_dir=args.logs_dir, name=args.exp_name, default_hp_metric=False)
 
-    logger = pl.loggers.TensorBoardLogger(save_dir=args.logs_dir, name=exp_name, default_hp_metric=False)
-
-    ckpt_callback = pl.callbacks.ModelCheckpoint(dirpath="{}/{}".format(args.checkpoints_dir, exp_name),
+    ckpt_callback = pl.callbacks.ModelCheckpoint(dirpath="{}/{}".format(args.checkpoints_dir, args.exp_name),
                                                  filename="{epoch:d}",
                                                  monitor="val/psnr",
                                                  mode="max",
                                                  save_top_k=-1)
 
-    trainer = pl.Trainer(max_steps=100000,
+    trainer = pl.Trainer(max_steps=args.max_steps,
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,

@@ -36,7 +36,7 @@ class DefaultConfig:
     siren: bool = False       # use Siren activation if True, otherwise use ReLU
     n_samples: int = 64       # number of coarse samples
     #n_importance: int = 64    # number of additional fine samples for the fine model
-    n_importance: int = 0    # number of additional fine samples for the fine model
+    n_importance: int = 128    # number of additional fine samples for the fine model
     variant: str = "classic"
 
     # skip connections
@@ -51,13 +51,13 @@ class DefaultConfig:
 class SNerfBasicConfig:
     """S-NeRF configuration."""
 
-    name: str = "s-nerf_basic"
+    name: str = "s-nerf"
     training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
 
     layers: int = 8
-    feat: int = 100
+    feat: int = 256 #100
     mapping: bool = True
-    siren: bool = True
+    siren: bool = False #True
     n_samples: int = 64
     n_importance: int = 0
     variant: str = "s-nerf"
@@ -72,9 +72,9 @@ def load_config(args):
 
     conf = OmegaConf.structured(config_dict[args.config_name])
 
-    if "s-nerf" in args.config_name:
-        conf.training.lr = float(1e-4)
-        conf.training.bs = int(256)
+    #if "s-nerf" in args.config_name:
+        #conf.training.lr = float(1e-4)
+        #conf.training.bs = int(256)
 
     if args.dataset_name == "blender":
         conf.input_sizes[1] = 3

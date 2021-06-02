@@ -186,11 +186,13 @@ def render_rays(models,
     model_coarse = models[0]
     if test_time:
         weights_coarse = \
-            inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=True)
+            inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=True,
+                      variant=variant)
     else:
         if variant == "s-nerf":
             rgb_coarse, depth_coarse, weights_coarse, transparency_coarse, sun_visibility_coarse = \
-                inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
+                inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False,
+                          variant=variant)
             result = {'rgb_coarse': rgb_coarse,
                       'depth_coarse': depth_coarse,
                       'opacity_coarse': weights_coarse.sum(1),
@@ -199,7 +201,8 @@ def render_rays(models,
                       'sun_visibility_coarse': sun_visibility_coarse}
         else:
             rgb_coarse, depth_coarse, weights_coarse = \
-                inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
+                inference(model_coarse, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False,
+                          variant=variant)
             result = {'rgb_coarse': rgb_coarse,
                       'depth_coarse': depth_coarse,
                       'opacity_coarse': weights_coarse.sum(1)}
@@ -221,18 +224,20 @@ def render_rays(models,
         model_fine = models[1]
         if variant == "s-nerf":
             rgb_fine, depth_fine, weights_fine, transparency_fine, sun_visibility_fine = \
-                inference(model_fine, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
-            result = {'rgb_fine': rgb_fine,
-                      'depth_fine': depth_fine,
-                      'opacity_fine': weights_fine.sum(1),
-                      'weights_fine': weights_fine,
-                      'transparency_fine': transparency_fine,
-                      'sun_visibility_fine': sun_visibility_fine}
+                inference(model_fine, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False,
+                          variant=variant)
+            result['rgb_fine'] = rgb_fine
+            result['depth_fine'] = depth_fine
+            result['opacity_fine'] = weights_fine.sum(1)
+            result['weights_fine'] = weights_fine
+            result['transparency_fine'] = transparency_fine
+            result['sun_visibility_fine'] = sun_visibility_fine
         else:
             rgb_fine, depth_fine, weights_fine = \
-                inference(model_fine, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False)
-            result = {'rgb_fine': rgb_fine,
-                      'depth_fine': depth_fine,
-                      'opacity_fine': weights_fine.sum(1)}
+                inference(model_fine, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d_, weights_only=False,
+                          variant=variant)
+            result['rgb_fine'] = rgb_fine
+            result['depth_fine'] = depth_fine
+            result['opacity_fine'] = weights_fine.sum(1)
 
     return result

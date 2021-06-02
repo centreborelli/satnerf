@@ -11,6 +11,7 @@ torch-optimizer
 rpcm @ git+https://github.com/cmla/rpcm.git@localization-origin
 plyflatten
 utm
+omegaconf
 
 # for mesh
 PyMCubes

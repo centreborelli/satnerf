@@ -126,6 +126,9 @@ class SatelliteDataset(Dataset):
         self.img_to_tensor = T.ToTensor()
         self.white_back = False
 
+        assert os.path.exists(root_dir), "root_dir does not exist"
+        assert os.path.exists(img_dir), "img_dir does not exist"
+
         # load scene center and range
         if not os.path.exists("{}/scene.loc".format(self.json_dir)):
             print("Could not find a scene.loc file in the root directory, creating one...")

@@ -46,7 +46,7 @@ def get_scheduler(optimizer, lr_scheduler, num_epochs):
         scheduler = MultiStepLR(optimizer, milestones=[2,4,8], gamma=0.5)
         #scheduler = MultiStepLR(optimizer, milestones=[50,100,200], gamma=0.5)
     elif lr_scheduler == 'step':
-        gamma = 0.7
+        gamma = 0.9
         scheduler = StepLR(optimizer, step_size=1, gamma=gamma)
     else:
         raise ValueError('lr scheduler not recognized!')
@@ -63,6 +63,7 @@ def visualize_depth(depth, cmap=cv2.COLORMAP_JET):
     ma = np.max(x)
     x = (x-mi)/(ma-mi+1e-8) # normalize to 0~1
     x = (255*x).astype(np.uint8)
+    x = np.clip(x, 0, 255)
     x_ = Image.fromarray(cv2.applyColorMap(x, cmap))
     x_ = T.ToTensor()(x_) # (3, H, W)
     return x_

@@ -38,7 +38,8 @@ class NeRF_pl(pl.LightningModule):
                                 skips=self.conf.skips,
                                 siren=self.conf.siren,
                                 mapping=self.conf.mapping,
-                                mapping_sizes=self.conf.mapping_sizes)
+                                mapping_sizes=self.conf.mapping_sizes,
+                                variant=self.conf.variant)
 
         self.models = [self.nerf_coarse]
 
@@ -49,7 +50,8 @@ class NeRF_pl(pl.LightningModule):
                                   skips=self.conf.skips,
                                   siren=self.conf.siren,
                                   mapping=self.conf.mapping,
-                                  mapping_sizes=self.conf.mapping_sizes)
+                                  mapping_sizes=self.conf.mapping_sizes,
+                                  variant=self.conf.variant)
 
             self.models += [self.nerf_fine]
 
@@ -164,13 +166,16 @@ class NeRF_pl(pl.LightningModule):
                 out_path = "{}/rgb/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
                 utils.save_output_image(img, out_path, src_path)
 
-                roi_txt = "/home/roger/Datasets/DFC2019/Track3-Truth/{}_DSM.txt".format(src_id[:7])
+                #roi_txt = "/home/roger/Datasets/DFC2019/Track3-Truth/{}_DSM.txt".format(src_id[:7])
+                roi_txt = "/mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth/{}_DSM.txt".format(src_id[:7])
                 out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
                 dsm = self.train_dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(),
                                                                       dsm_path=out_path, roi_txt=roi_txt)
 
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
         self.log("val/psnr", psnr_)
+        ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))
+        self.log("val/ssim", ssim_)
 
         return {"loss": loss}
 

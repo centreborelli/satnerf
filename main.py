@@ -165,6 +165,8 @@ class NeRF_pl(pl.LightningModule):
 
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
         self.log("val/psnr", psnr_)
+        ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))
+        self.log("val/ssim", ssim_)
 
         return {"loss": loss}
 

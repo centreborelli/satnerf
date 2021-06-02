@@ -23,19 +23,19 @@ class SNerfLoss(torch.nn.Module):
         super().__init__()
         self.coef = coef
         self.loss = torch.nn.MSELoss(reduction='mean')
-        self.lambda_s = 0.00
+        self.lambda_s = 0.05
 
     def forward(self, inputs, targets):
         term1 = self.loss(inputs['rgb_coarse'], targets)
-        term2 = torch.square(inputs['transparency_coarse'] - inputs['sun_visibility_coarse']).sum(1)
-        term3 = 1 - (inputs['weights_coarse'] * inputs['sun_visibility_coarse']).sum(1)
-        loss = term1 + self.lambda_s * torch.sum(term2 + term3)
+        term2 = torch.square(inputs['transparency_coarse'].detach() - inputs['sun_visibility_coarse']).sum(1)
+        term3 = 1 - (inputs['weights_coarse'].detach() * inputs['sun_visibility_coarse']).sum(1)
+        loss = term1 + self.lambda_s * torch.mean(term2 + term3)
 
         if 'rgb_fine' in inputs:
             term1 = self.loss(inputs['rgb_fine'], targets)
-            term2 = torch.square(inputs['transparency_fine'] - inputs['sun_visibility_fine']).sum(1)
-            term3 = 1 - (inputs['weights_fine'] * inputs['sun_visibility_fine']).sum(1)
-            loss += term1 + self.lambda_s * torch.sum(term2 + term3)
+            term2 = torch.square(inputs['transparency_fine'].detach() - inputs['sun_visibility_fine']).sum(1)
+            term3 = 1 - (inputs['weights_fine'].detach() * inputs['sun_visibility_fine']).sum(1)
+            loss += term1 + self.lambda_s * torch.mean(term2 + term3)
 
         return self.coef * loss
 

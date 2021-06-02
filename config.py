@@ -36,7 +36,7 @@ class DefaultConfig:
     siren: bool = False       # use Siren activation if True, otherwise use ReLU
     n_samples: int = 64       # number of coarse samples
     #n_importance: int = 64    # number of additional fine samples for the fine model
-    n_importance: int = 0    # number of additional fine samples for the fine model
+    n_importance: int = 128    # number of additional fine samples for the fine model
     variant: str = "classic"
 
     # skip connections

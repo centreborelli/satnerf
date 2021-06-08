@@ -23,7 +23,7 @@ class SNerfLoss(torch.nn.Module):
         super().__init__()
         self.coef = coef
         self.loss = torch.nn.MSELoss(reduction='mean')
-        self.lambda_s = 0.05
+        self.lambda_s = 0.0
 
     def forward(self, inputs, targets):
         term1 = self.loss(inputs['rgb_coarse'], targets)

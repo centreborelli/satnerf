@@ -2,21 +2,35 @@
 This script defines the NeRF architecture
 """
 
-
+import numpy as np
 import torch
 from torch import nn
 
+def sine_init(m):
+    with torch.no_grad():
+        if hasattr(m, 'weight'):
+            num_input = m.weight.size(-1)
+            # See supplement Sec. 1.5 for discussion of factor 30
+            m.weight.uniform_(-np.sqrt(6 / num_input), np.sqrt(6 / num_input))
+
+def first_layer_sine_init(m):
+    with torch.no_grad():
+        if hasattr(m, 'weight'):
+            num_input = m.weight.size(-1)
+            # See paper sec. 3.2, final paragraph, and supplement Sec. 1.5 for discussion of factor 30
+            m.weight.uniform_(-1 / num_input, 1 / num_input)
 
 class Siren(nn.Module):
     """
     Siren layer
     """
 
-    def __init__(self):
+    def __init__(self, w0=1.0):
         super().__init__()
+        self.w0 = w0
 
     def forward(self, input):
-        return torch.sin(30 * input)
+        return torch.sin(self.w0 * input)
 
 
 class Mapping(nn.Module):
@@ -99,8 +113,7 @@ class NeRF(nn.Module):
         # define the main network of fully connected layers, i.e. FC_NET
         fc_layers = []
         fc_layers.append(torch.nn.Linear(in_size[0], feat))
-        fc_layers.append(nl)
-
+        fc_layers.append(Siren(w0=30.0) if siren else nl)
         for i in range(1, layers):
             if i in skips:
                 fc_layers.append(torch.nn.Linear(feat + in_size[0], feat))
@@ -140,6 +153,13 @@ class NeRF(nn.Module):
                 torch.nn.Linear(feat // 2, 3),
                 torch.nn.Sigmoid(),
             )
+
+        if siren:
+            self.fc_net.apply(sine_init)
+            self.sun_v_net.apply(sine_init)
+            self.fc_net[0].apply(first_layer_sine_init)
+            self.sun_v_net[0].apply(first_layer_sine_init)
+
 
     def forward(self, input_xyz, input_dir=None, input_sun_dir=None, sigma_only=False):
         """

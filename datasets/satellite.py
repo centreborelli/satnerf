@@ -166,6 +166,10 @@ class SatelliteDataset(Dataset):
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
                 json_files = f.read().split("\n")
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
+            # add an extra image from the training set to the validation set (for debugging purposes)
+            with open(os.path.join(self.json_dir, "train.txt"), "r") as f:
+                json_files = f.read().split("\n")
+            self.json_files = [os.path.join(self.json_dir, json_files[0])] + self.json_files
         else:
             pass
 
@@ -390,11 +394,17 @@ class SatelliteDataset(Dataset):
             ysize = int(1 - np.floor((ymin - yoff) / resolution))
 
         from plyflatten import plyflatten
+        from plyflatten.utils import rasterio_crs, crs_proj
+        import utm
         import affine
         import rasterio
 
         # run plyflatten
         dsm = plyflatten(cloud, xoff, yoff, resolution, xsize, ysize, radius=3, sigma=float("inf"))
+
+        n = utm.latlon_to_zone_number(lats[0], lons[0])
+        l = utm.latitude_to_zone_letter(lats[0])
+        crs_proj = rasterio_crs(crs_proj("{}{}".format(n, l), crs_type="UTM"))
 
         # (optional) write dsm to disk
         if dsm_path is not None:
@@ -406,6 +416,7 @@ class SatelliteDataset(Dataset):
             profile["count"] = 1
             profile["driver"] = "GTiff"
             profile["nodata"] = float("nan")
+            profile["crs"] = crs_proj
             profile["transform"] = affine.Affine(resolution, 0.0, xoff, 0.0, -resolution, yoff)
             with rasterio.open(dsm_path, "w", **profile) as f:
                 f.write(dsm[:, :, 0], 1)

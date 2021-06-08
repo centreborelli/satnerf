@@ -36,7 +36,7 @@ class DefaultConfig:
     siren: bool = False       # use Siren activation if True, otherwise use ReLU
     n_samples: int = 64       # number of coarse samples
     #n_importance: int = 64    # number of additional fine samples for the fine model
-    n_importance: int = 128    # number of additional fine samples for the fine model
+    n_importance: int = 0    # number of additional fine samples for the fine model
     variant: str = "classic"
 
     # skip connections
@@ -56,8 +56,8 @@ class SNerfBasicConfig:
 
     layers: int = 8
     feat: int = 256 #100
-    mapping: bool = True
-    siren: bool = False #True
+    mapping: bool = False
+    siren: bool = True
     n_samples: int = 64
     n_importance: int = 0
     variant: str = "s-nerf"

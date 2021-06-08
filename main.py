@@ -133,9 +133,8 @@ class NeRF_pl(pl.LightningModule):
         rgbs = rgbs.squeeze()  # (H*W, 3)
         results = self(rays)
         loss = self.loss(results, rgbs)
-        self.log("val/loss", loss)
-        typ = "fine" if "rgb_fine" in results else "coarse"
 
+        typ = "fine" if "rgb_fine" in results else "coarse"
         W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
         img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
         img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
@@ -144,30 +143,29 @@ class NeRF_pl(pl.LightningModule):
         self.logger.experiment.add_images('val_'+str(batch_nb)+'/GT_pred_depth',
                                           stack, self.global_step)
 
-        if batch_nb == 0 and self.args.dataset_name == 'satellite':
+        # save output for a training image (batch_nb == 0) and a validation image (batch_nb == 1)
+        if (batch_nb == 0 or batch_nb == 1) and self.args.dataset_name == 'satellite':
             # save some images to disk for a more detailed visualization
             epoch = self.get_current_epoch(self.train_steps)
             src_path = batch["src_path"][0]
             src_id = batch["src_id"][0]
-            out_path = "{}/depth/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
             depth = results[f"depth_{typ}"]
-            # depth (altitudes) image
-            _, _, alts = self.val_dataset.get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
-            utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
-            # rgb image
-            out_path = "{}/rgb/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
+            out_dir = self.train_im_dir if batch_nb == 0 else self.val_im_dir
+            # save dsm
+            out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
+            dsm = self.val_dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
+            # save rgb image
+            out_path = "{}/rgb/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
             utils.save_output_image(img, out_path, src_path)
 
-            roi_txt = "/home/roger/Datasets/DFC2019/Track3-Truth/{}_DSM.txt".format(src_id[:7])
-            #roi_txt = "/mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth/{}_DSM.txt".format(src_id[:7])
-            out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(self.val_im_dir, src_id, epoch, self.train_steps)
-            dsm = self.train_dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(),
-                                                                  dsm_path=out_path, roi_txt=roi_txt)
-
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
-        self.log("val/psnr", psnr_)
         ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))
-        self.log("val/ssim", ssim_)
+
+        # 1st image is from the training set, so it must not contribute to the validation metrics
+        if batch_nb != 0 and self.args.dataset_name == 'satellite':
+            self.log("val/loss", loss)
+            self.log("val/psnr", psnr_)
+            self.log("val/ssim", ssim_)
 
         return {"loss": loss}
 
@@ -200,6 +198,7 @@ def main():
                          num_sanity_val_steps=1,
                          check_val_every_n_epoch=1,
                          profiler="simple")
+                         #gradient_clip_val=1)
 
     trainer.fit(system)
 

@@ -161,11 +161,16 @@ class NeRF_pl(pl.LightningModule):
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
         ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))
 
-        # 1st image is from the training set, so it must not contribute to the validation metrics
-        if batch_nb != 0 and self.args.dataset_name == 'satellite':
+        if self.args.dataset_name != 'satellite':
             self.log("val/loss", loss)
             self.log("val/psnr", psnr_)
             self.log("val/ssim", ssim_)
+        else:
+            # 1st image is from the training set, so it must not contribute to the validation metrics
+            if batch_nb != 0:
+                self.log("val/loss", loss)
+                self.log("val/psnr", psnr_)
+                self.log("val/ssim", ssim_)
 
         return {"loss": loss}
 

@@ -218,7 +218,7 @@ def render_rays(models,
         z_vals, _ = torch.sort(torch.cat([z_vals, z_vals_], -1), -1)
 
         # discretize rays for fine model
-        xyz_fine = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples, 3)
+        xyz_fine = rays_o.unsqueeze(1) + rays_d.unsqueeze(1) * z_vals.unsqueeze(2) # (N_rays, N_samples+N_importance, 3)
 
         # run fine model
         model_fine = models[1]

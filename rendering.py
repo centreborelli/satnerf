@@ -59,10 +59,10 @@ def render_rays(models,
                 chunk=1024*32,
                 white_back=False,
                 test_time=False,
-                variant="classic"
+                variant="nerf"
                 ):
 
-    def inference(model, xyz_, z_vals, rays_d=None, sun_d=None, weights_only=False, variant="classic"):
+    def inference(model, xyz_, z_vals, rays_d=None, sun_d=None, weights_only=False, variant="nerf"):
         """
         Helper function that performs model inference
         Args:
@@ -75,7 +75,7 @@ def render_rays(models,
             rays_d: (N_rays, 3) direction vectors of the rays
             sun_d: (N_rays, 3) sun direction vectors associated to the rays
             weights_only: do inference on sigma only or not
-            variant: NeRF variant that is used  (classic or s-nerf)
+            variant: NeRF variant that is used  (nerf or s-nerf)
         Returns:
             if weights_only:
                 weights: (N_rays, N_samples_): weights of each sample

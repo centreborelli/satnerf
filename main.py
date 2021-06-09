@@ -5,7 +5,7 @@ import torch
 import pytorch_lightning as pl
 
 from opt import get_opts
-from config import load_config
+from config import load_config, save_config
 from datasets import load_dataset
 from metrics import load_loss
 from torch.utils.data import DataLoader
@@ -24,6 +24,8 @@ class NeRF_pl(pl.LightningModule):
         super().__init__()
         self.args = args
         self.conf = load_config(args)
+        self.save_hyperparameters(dict(self.conf))
+
         self.loss = load_loss(args)
         self.define_models()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
@@ -39,7 +41,7 @@ class NeRF_pl(pl.LightningModule):
                                 siren=self.conf.siren,
                                 mapping=self.conf.mapping,
                                 mapping_sizes=self.conf.mapping_sizes,
-                                variant=self.conf.variant)
+                                variant=self.conf.name)
 
         self.models = [self.nerf_coarse]
 
@@ -51,7 +53,7 @@ class NeRF_pl(pl.LightningModule):
                                   siren=self.conf.siren,
                                   mapping=self.conf.mapping,
                                   mapping_sizes=self.conf.mapping_sizes,
-                                  variant=self.conf.variant)
+                                  variant=self.conf.name)
 
             self.models += [self.nerf_fine]
 
@@ -71,7 +73,7 @@ class NeRF_pl(pl.LightningModule):
                             perturb=self.conf.training.perturb,
                             noise_std=self.conf.training.noise_std,
                             chunk=chunk_size,
-                            variant=self.conf.variant)
+                            variant=self.conf.name)
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
 

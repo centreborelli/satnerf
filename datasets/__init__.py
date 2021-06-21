@@ -12,6 +12,7 @@ def load_dataset(args, split):
         return dataset(root_dir=args.root_dir,
                        img_dir=args.img_dir if args.img_dir is not None else args.root_dir,
                        split=split,
-                       cache_dir=args.cache_dir)
+                       cache_dir=args.cache_dir,
+                       img_downscale=args.img_downscale)
     else:
         return dataset(root_dir=args.root_dir, split=split)

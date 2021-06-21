@@ -10,15 +10,18 @@ import glob
 
 gt_dir = "../Datasets/DFC2019/Track3-Truth"
 logs_dir = "logs"
-aoi_id = "JAX_068"
+aoi_id = "JAX_004"
 
 """
 exp_names = ["2021-06-08_23:04:28_snerf_siren_h256_test"]
 """
 
-exp_names = ["2021-06-02_14:41:41_nerf_classic_fine128",
-             "2021-06-08_11:52:10_snerf_pe_h256",
-             "2021-06-08_16:37:35_snerf_siren_h256"]
+#exp_names = ["2021-06-02_14:41:41_nerf_classic_fine128",
+#             "2021-06-08_11:52:10_snerf_pe_h256",
+#             "2021-06-08_16:37:35_snerf_siren_h256"]
+
+exp_names = ["2021-06-16_04:58:08_nerf_jax004",
+             "2021-06-16_04:50:03_snerf_jax004"]
 
 
 #####################
@@ -48,7 +51,7 @@ def compute_absolute_error(dsm_path, gt_path, err_path=None):
     return err
 
 # only if you are checking old runs (previous to June 8)
-old_outputs = True
+old_outputs = False
 
 # the lists with the evolution of the mae for each run will be stored in a dictionary
 mae = {}
@@ -77,20 +80,24 @@ else:
     for e in exp_names:
         log_path = os.path.join(logs_dir, e)
         dsm_paths = sorted_nicely(glob.glob(os.path.join(log_path, "val/dsm/*.tif")))
+        print(dsm_paths)
         for d in dsm_paths:
             crop_path = d.replace("/dsm/", "/dsm_crops/")
             err_path = d.replace("/dsm/", "/dsm_err/")
             os.makedirs(os.path.dirname(crop_path), exist_ok=True)
             # TODO maybe rasterio can do this faster ?
-            os.system("gdal_translate -projwin {} {} {} {} {} {}".format(ulx, uly, lrx, lry, d, crop_path))
+            if not os.path.exists(crop_path):
+                os.system("gdal_translate -projwin {} {} {} {} {} {}".format(ulx, uly, lrx, lry, d, crop_path))
             err = compute_absolute_error(crop_path, gt_path, err_path)
             mae[e].append(np.nanmean(err.ravel()))
 
 
+colors = ["blue", "firebrick", "magenta", "green", "grey", "darkorange"]
+
 plt.figure(figsize=(10, 5))
 labels = list(mae.keys())
-for i, e in enumerate(exp_names):
-    plt.plot(mae[e])
+for i, (e, c) in enumerate(zip(exp_names, colors)):
+    plt.plot(np.arange(1, len(mae[e])+1), mae[e], color=c)
     labels[i] += "    last: {:.2f} m".format(mae[e][-1])
 plt.legend(labels)
 plt.savefig('mae.png', bbox_inches='tight')

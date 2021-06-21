@@ -21,7 +21,7 @@ class TrainingConfig:
     use_disp: bool = False       # True is buggy with satellite FIXME
 
     lr_scheduler: str = "step"
-
+    max_steps: int = 100000
 
 @dataclasses.dataclass
 class DefaultConfig:

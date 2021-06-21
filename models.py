@@ -39,7 +39,7 @@ class Mapping(nn.Module):
         Defines a function that embeds x to (x, sin(2^k x), cos(2^k x), ...)
         in_channels: number of input channels (3 for both xyz and direction)
         """
-        super(Mapping, self).__init__()
+        super().__init__()
         self.N_freqs = mapping_size
         self.in_channels = in_size
         self.funcs = [torch.sin, torch.cos]
@@ -68,7 +68,6 @@ class Mapping(nn.Module):
 
         return torch.cat(out, -1)
 
-
 # Concatenation done after the application of the layer in the NeRF framework. That's wy the skip layer is 5 instead of 4 as suggested in the paper
 class NeRF(nn.Module):
     def __init__(self,
@@ -77,7 +76,7 @@ class NeRF(nn.Module):
                  skips=[4], siren=False,
                  mapping=True,
                  mapping_sizes=[10, 4],
-                 variant="classic"):
+                 variant="nerf"):
         """
         layers: integer, number of layers for density (sigma) encoder
         feat: integer, number of hidden units in each layer
@@ -95,7 +94,7 @@ class NeRF(nn.Module):
         self.input_sizes = input_sizes
         self.rgb_padding = 0.001
         self.outputs_per_variant = {
-            "classic": 4,  # r, g, b (3) + sigma (1)
+            "nerf": 4,  # r, g, b (3) + sigma (1)
             "s-nerf": 8,  # r, g, b (3) + sigma (1) + sun visibility (1) + r, g, b from sky color (3)
         }
 
@@ -139,7 +138,7 @@ class NeRF(nn.Module):
             sun_dir_in_size = 3
             sun_v_layers = []
             sun_v_layers.append(torch.nn.Linear(feat + sun_dir_in_size, feat // 2))
-            sun_v_layers.append(nl)
+            sun_v_layers.append(Siren(w0=30.0) if siren else nl)
             for i in range(1, 3):
                 sun_v_layers.append(torch.nn.Linear(feat // 2, feat // 2))
                 sun_v_layers.append(nl)

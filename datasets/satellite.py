@@ -108,7 +108,7 @@ def rescale_RPC(rpc, alpha):
 
 
 class SatelliteDataset(Dataset):
-    def __init__(self, root_dir, img_dir, split="train", img_downscale=1, cache_dir=None):
+    def __init__(self, root_dir, img_dir, split="train", img_downscale=1.0, cache_dir=None):
         """
         NeRF Satellite Dataset
         Args:
@@ -122,7 +122,7 @@ class SatelliteDataset(Dataset):
         self.img_dir = img_dir
         self.cache_dir = cache_dir
         self.split = split
-        self.img_downscale = max(4.0, int(img_downscale))
+        self.img_downscale = float(img_downscale)
         self.img_to_tensor = T.ToTensor()
         self.white_back = False
 

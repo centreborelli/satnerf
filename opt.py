@@ -4,6 +4,8 @@ This script defines the input parameters that can be customized from the command
 
 import argparse
 import datetime
+import json
+import os
 
 def get_opts():
     parser = argparse.ArgumentParser()
@@ -30,14 +32,16 @@ def get_opts():
                         help='Directory where the images are located (if different than root_dir)')
     parser.add_argument('--cache_dir', type=str, default=None,
                         help='Directory where cache for the current dataset is found')
-
-    parser.add_argument('--max_steps', type=int, default=100000,
-                        help='Maximum iteration steps for training')
+    parser.add_argument('--img_downscale', type=float, default=1.0,
+                        help='Downscale factor for the input images')
 
     args = parser.parse_args()
 
     exp_id = args.config_name if args.exp_name is None else args.exp_name
-    args.exp_name = "{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H:%M:%S"), exp_id)
+    args.exp_name = "{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), exp_id)
 
+    os.makedirs("{}/{}".format(args.logs_dir, args.exp_name), exist_ok=True)
+    with open("{}/{}/opts.json".format(args.logs_dir, args.exp_name), "w") as f:
+        json.dump(vars(args), f, indent=2)
 
     return args

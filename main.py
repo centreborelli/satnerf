@@ -94,7 +94,7 @@ class NeRF_pl(pl.LightningModule):
 
         scheduler = utils.get_scheduler(optimizer=self.optimizer,
                                         lr_scheduler=self.conf.training.lr_scheduler,
-                                        num_epochs=self.get_current_epoch(self.args.max_steps))
+                                        num_epochs=self.get_current_epoch(self.conf.training.max_steps))
         return [self.optimizer], [scheduler]
 
     def train_dataloader(self):
@@ -142,7 +142,9 @@ class NeRF_pl(pl.LightningModule):
         img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
         depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)
         stack = torch.stack([img_gt, img, depth])  # (3, 3, H, W)
-        self.logger.experiment.add_images('val_'+str(batch_nb)+'/GT_pred_depth',
+        split = 'train' if self.args.dataset_name == 'satellite' and batch_nb == 0 else 'val'
+        sample_idx = batch_nb - 1 if self.args.dataset_name == 'satellite' and batch_nb != 0 else batch_nb
+        self.logger.experiment.add_images('{}_{}/GT_pred_depth'.format(split, sample_idx),
                                           stack, self.global_step)
 
         # save output for a training image (batch_nb == 0) and a validation image (batch_nb == 1)
@@ -153,6 +155,10 @@ class NeRF_pl(pl.LightningModule):
             src_id = batch["src_id"][0]
             depth = results[f"depth_{typ}"]
             out_dir = self.train_im_dir if batch_nb == 0 else self.val_im_dir
+            # save depth prediction
+            _, _, alts = self.val_dataset.get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
+            out_path = "{}/depth/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
+            utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
             # save dsm
             out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
             dsm = self.val_dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
@@ -193,7 +199,7 @@ def main():
                                                  mode="max",
                                                  save_top_k=-1)
 
-    trainer = pl.Trainer(max_steps=args.max_steps,
+    trainer = pl.Trainer(max_steps=system.conf.training.max_steps,
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,

@@ -145,9 +145,14 @@ class SatelliteDataset(Dataset):
                     all_rays += [rays]
                 all_rays = torch.cat(all_rays, 0)
             d = {}
-            d["X_scale"], d["X_offset"] = scaling_params(all_rays[:, 0])
-            d["Y_scale"], d["Y_offset"] = scaling_params(all_rays[:, 1])
-            d["Z_scale"], d["Z_offset"] = scaling_params(all_rays[:, 2])
+
+            near_points = all_rays[:,:3]
+            far_points = all_rays[:,:3] + all_rays[:,7:8] * all_rays[:,3:6]
+            all_points = torch.cat([near_points, far_points], 0)
+            d["X_scale"], d["X_offset"] = scaling_params(all_points[:, 0])
+            d["Y_scale"], d["Y_offset"] = scaling_params(all_points[:, 1])
+            d["Z_scale"], d["Z_offset"] = scaling_params(all_points[:, 2])
+
             with open("{}/scene.loc".format(self.json_dir), "w") as f:
                 json.dump(d, f, indent=2)
             print("... done !")
@@ -164,7 +169,7 @@ class SatelliteDataset(Dataset):
             self.all_rays, self.all_rgbs = self.load_data(self.json_files, verbose=True)
         elif self.split == "val":
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
-                json_files = f.read().split("\n")
+                json_files = f.read().split("\n")[:-1]
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
             # add an extra image from the training set to the validation set (for debugging purposes)
             with open(os.path.join(self.json_dir, "train.txt"), "r") as f:

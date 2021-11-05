@@ -178,7 +178,7 @@ class SatelliteDataset(Dataset):
                 self.all_rays, self.all_rgbs = self.load_data(self.json_files, verbose=True)
         elif self.split == "val":
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
-                json_files = f.read().split("\n")[:-1]
+                json_files = f.read().split("\n")
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
             # add an extra image from the training set to the validation set (for debugging purposes)
             with open(os.path.join(self.json_dir, "train.txt"), "r") as f:

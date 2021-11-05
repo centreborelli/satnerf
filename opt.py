@@ -34,6 +34,14 @@ def get_opts():
                         help='Directory where cache for the current dataset is found')
     parser.add_argument('--img_downscale', type=float, default=1.0,
                         help='Downscale factor for the input images')
+    parser.add_argument('--depth_supervision', dest='depth', action='store_true',
+                        help='Use a set of known 3d points to supervise the geometry learning')
+    parser.add_argument('--depthloss_drop', type=int, default=10,
+                        help='Epoch at which the depth supervision loss should be dropped')
+    parser.add_argument('--depthloss_without_weights', action='store_true',
+                        help='Do not use the reprojection errors to weight the depth supervision loss')
+    parser.add_argument('--gt_dir', type=str, default=None,
+                        help='Directory where the ground truth DSM is located (if available)')
 
     args = parser.parse_args()
 

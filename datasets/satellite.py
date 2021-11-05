@@ -108,7 +108,7 @@ def rescale_RPC(rpc, alpha):
 
 
 class SatelliteDataset(Dataset):
-    def __init__(self, root_dir, img_dir, split="train", img_downscale=1.0, cache_dir=None):
+    def __init__(self, root_dir, img_dir, split="train", img_downscale=1.0, cache_dir=None, depth=False):
         """
         NeRF Satellite Dataset
         Args:
@@ -125,6 +125,7 @@ class SatelliteDataset(Dataset):
         self.img_downscale = float(img_downscale)
         self.img_to_tensor = T.ToTensor()
         self.white_back = False
+        self.depth = depth
 
         assert os.path.exists(root_dir), "root_dir does not exist"
         assert os.path.exists(img_dir), "img_dir does not exist"
@@ -141,7 +142,8 @@ class SatelliteDataset(Dataset):
                     h, w = int(d["height"] // self.img_downscale), int(d["width"] // self.img_downscale)
                     rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
                     min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
-                    rays = self.get_rays(h, w, rpc, min_alt, max_alt)
+                    cols, rows = np.meshgrid(np.arange(h), np.arange(w))
+                    rays = self.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
                     all_rays += [rays]
                 all_rays = torch.cat(all_rays, 0)
             d = {}
@@ -161,7 +163,14 @@ class SatelliteDataset(Dataset):
             with open(os.path.join(self.json_dir, "train.txt"), "r") as f:
                 json_files = f.read().split("\n")[:-1]
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
-            self.all_rays, self.all_rgbs = self.load_data(self.json_files, verbose=True)
+            if self.depth:
+                if os.path.exists(self.json_dir + "/pts3d.npy"):
+                    self.tie_points = np.load(self.json_dir + "/pts3d.npy")
+                    self.all_rays, self.all_depths = self.load_depth_data(self.json_files, self.tie_points, verbose=True)
+                else:
+                    raise FileNotFoundError("Could not find {}".format(self.json_dir + "/pts3d.npy"))
+            else:
+                self.all_rays, self.all_rgbs = self.load_data(self.json_files, verbose=True)
         elif self.split == "val":
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
                 json_files = f.read().split("\n")
@@ -208,20 +217,16 @@ class SatelliteDataset(Dataset):
                 h, w = int(d["height"] // self.img_downscale), int(d["width"] // self.img_downscale)
                 rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
                 min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
-                rays = self.get_rays(h, w, rpc, min_alt, max_alt)
+
+                # create grid with all pixel coordinates and compute rays
+                cols, rows = np.meshgrid(np.arange(h), np.arange(w))
+                rays = self.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
                 if self.cache_dir is not None:
                     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
                     torch.save(rays, cache_path)
 
             # normalize rays
-            rays[:, 0] -= self.center[0]
-            rays[:, 1] -= self.center[1]
-            rays[:, 2] -= self.center[2]
-            rays[:, 0] /= self.range
-            rays[:, 1] /= self.range
-            rays[:, 2] /= self.range
-            rays[:, 6] /= self.range
-            rays[:, 7] /= self.range
+            rays = self.normalize_rays(rays)
 
             # get sun direction
             sun_dirs = self.get_sun_dirs(float(d["sun_elevation"]), float(d["sun_azimuth"]), rays.shape[0])
@@ -239,6 +244,92 @@ class SatelliteDataset(Dataset):
         all_rays = all_rays.type(torch.FloatTensor)
         all_rgbs = all_rgbs.type(torch.FloatTensor)
         return all_rays, all_rgbs
+
+    def load_depth_data(self, json_files, tie_points, verbose=False):
+
+        all_rays, all_depths, all_sun_dirs, all_weights = [], [], [], []
+        kp_weights = self.load_keypoint_weights_for_depth_supervision(json_files, tie_points)
+
+        for t, json_p in enumerate(json_files):
+            # read json
+            with open(json_p) as f:
+                d = json.load(f)
+            img_id = get_file_id(d["img"])
+
+            if "keypoints" not in d.keys():
+                raise ValueError("No 'keypoints' field was found in {}".format(json_p))
+
+            pts2d = np.array(d["keypoints"]["2d_coordinates"])/ self.img_downscale
+            pts3d = np.array(tie_points[d["keypoints"]["pts3d_indices"], :])
+            rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
+
+            # build the sparse batch of rays for depth supervision
+            cols, rows = pts2d.T
+            min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
+            rays = self.get_rays(cols, rows, rpc, min_alt, max_alt)
+            rays = self.normalize_rays(rays)
+            all_rays += [rays]
+
+            # get sun direction
+            sun_dirs = self.get_sun_dirs(float(d["sun_elevation"]), float(d["sun_azimuth"]), rays.shape[0])
+            all_sun_dirs += [sun_dirs]
+
+            # normalize the 3d coordinates of the tie points observed in the current view
+            pts3d = torch.from_numpy(pts3d).type(torch.FloatTensor)
+            pts3d[:, 0] -= self.center[0]
+            pts3d[:, 1] -= self.center[1]
+            pts3d[:, 2] -= self.center[2]
+            pts3d[:, 0] /= self.range
+            pts3d[:, 1] /= self.range
+            pts3d[:, 2] /= self.range
+
+            # compute depths
+            depths = torch.linalg.norm(pts3d - rays[:, :3], axis=1)
+            all_depths += [depths[:, np.newaxis]]
+            current_weights = torch.from_numpy(kp_weights[d["keypoints"]["pts3d_indices"]]).type(torch.FloatTensor)
+            all_weights += [current_weights[:, np.newaxis]]
+            if verbose:
+                print("Depth {} loaded ( {} / {} )".format(img_id, t + 1, len(json_files)))
+
+        all_rays = torch.cat(all_rays, 0)  # (len(json_files)*h*w, 8)
+        all_depths = torch.cat(all_depths, 0)  # (len(json_files)*h*w, 1)
+        all_weights = torch.cat(all_weights, 0)
+        all_depths = torch.hstack([all_depths, all_weights])  # (len(json_files)*h*w, 11)
+        all_sun_dirs = torch.cat(all_sun_dirs, 0)  # (len(json_files)*h*w, 3)
+        all_rays = torch.hstack([all_rays, all_sun_dirs])  # (len(json_files)*h*w, 11)
+        all_rays = all_rays.type(torch.FloatTensor)
+        all_depths = all_depths.type(torch.FloatTensor)
+
+        return all_rays, all_depths
+
+    def load_keypoint_weights_for_depth_supervision(self, json_files, tie_points):
+
+        n_pts = tie_points.shape[0]
+        n_cams = len(json_files)
+        reprojection_errors = np.zeros((n_pts, n_cams), dtype=np.float32)
+        for t, json_p in enumerate(json_files):
+            with open(json_p) as f:
+                d = json.load(f)
+
+            if "keypoints" not in d.keys():
+                raise ValueError("No 'keypoints' field was found in {}".format(json_p))
+
+            pts2d = np.array(d["keypoints"]["2d_coordinates"])
+            pts3d = np.array(tie_points[d["keypoints"]["pts3d_indices"], :])
+
+            rpc = rpcm.RPCModel(d["rpc"])
+
+            lat, lon, alt = ecef_to_latlon_custom(pts3d[:, 0], pts3d[:, 1], pts3d[:, 2])
+            col, row = rpc.projection(lon, lat, alt)
+            pts2d_reprojected = np.vstack((col, row)).T
+            errs_obs_current_cam = np.linalg.norm(pts2d - pts2d_reprojected, axis=1)
+            reprojection_errors[d["keypoints"]["pts3d_indices"], t] = errs_obs_current_cam
+
+        e = np.sum(reprojection_errors, axis=1)
+        e_mean = np.mean(e)
+        weights = np.exp(-(e/e_mean)**2)
+
+        return weights
 
     def get_rgbs(self, img_path):
         """
@@ -259,15 +350,15 @@ class SatelliteDataset(Dataset):
         rgbs = rgbs.type(torch.FloatTensor)
         return rgbs
 
-    def get_rays(self, h, w, rpc, min_alt, max_alt):
+    def get_rays(self, cols, rows, rpc, min_alt, max_alt):
         """
         Draw a set of rays from a satellite image
         Each ray is defined by an origin 3d point + a direction vector
         First the bounds of each ray are found by localizing each pixel at min and max altitude
         Then the corresponding direction vector is found by the difference between such bounds
         Args:
-            h: int, image height
-            w: int, image width
+            cols: 1d array with image column coordinates
+            rows: 1d array with image row coordinates
             rpc: RPC model with the localization function associated to the satellite image
             min_alt: float, the minimum altitude observed in the image
             max_alt: float, the maximum altitude observed in the image
@@ -278,10 +369,6 @@ class SatelliteDataset(Dataset):
                   columns 6,7 correspond to the distance of the ray bounds with respect to the camera
         """
 
-        # create grid with all pixel coordinates
-        cols, rows = np.meshgrid(np.arange(h), np.arange(w))
-        rows = rows.reshape((-1,))
-        cols = cols.reshape((-1,))
         min_alts = float(min_alt) * np.ones(cols.shape)
         max_alts = float(max_alt) * np.ones(cols.shape)
 
@@ -310,6 +397,17 @@ class SatelliteDataset(Dataset):
         # create a stack with the rays origin, direction vector and near-far bounds
         rays = torch.from_numpy(np.hstack([rays_o, rays_d, nears[:, np.newaxis], fars[:, np.newaxis]]))
         rays = rays.type(torch.FloatTensor)
+        return rays
+
+    def normalize_rays(self, rays):
+        rays[:, 0] -= self.center[0]
+        rays[:, 1] -= self.center[1]
+        rays[:, 2] -= self.center[2]
+        rays[:, 0] /= self.range
+        rays[:, 1] /= self.range
+        rays[:, 2] /= self.range
+        rays[:, 6] /= self.range
+        rays[:, 7] /= self.range
         return rays
 
     def get_sun_dirs(self, sun_elevation_deg, sun_azimuth_deg, n_rays):
@@ -433,15 +531,21 @@ class SatelliteDataset(Dataset):
     def __getitem__(self, idx):
         # take a batch from the dataset
         if self.split == "train":
-            sample = {"rays": self.all_rays[idx], "rgbs": self.all_rgbs[idx]}
+            if self.depth:
+                sample = {"rays": self.all_rays[idx], "depths": self.all_depths[idx]}
+            else:
+                sample = {"rays": self.all_rays[idx], "rgbs": self.all_rgbs[idx]}
         else:
             json_p = self.json_files[idx]
-            rays, rgbs = self.load_data([json_p])
-
             with open(json_p) as f:
                 d = json.load(f)
             img_p = os.path.join(self.img_dir, d["img"])
             img_id = get_file_id(d["img"])
 
-            sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id}
+            if self.depth:
+                rays, depths = self.load_depth_data([json_p])
+                sample = {"rays": rays, "depths": depths, "src_path": img_p, "src_id": img_id}
+            else:
+                rays, rgbs = self.load_data([json_p])
+                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id}
         return sample

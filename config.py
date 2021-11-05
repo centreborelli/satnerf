@@ -61,6 +61,7 @@ class SNerfBasicConfig:
     skips: list = dataclasses.field(default_factory=lambda: [4])
     input_sizes: list = dataclasses.field(default_factory=lambda: [3, 0])
     mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
+    lambda_s: float = 0.05
 
 
 def load_config(args):

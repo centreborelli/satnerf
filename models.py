@@ -138,12 +138,12 @@ class NeRF(nn.Module):
             sun_dir_in_size = 3
             sun_v_layers = []
             sun_v_layers.append(torch.nn.Linear(feat + sun_dir_in_size, feat // 2))
-            sun_v_layers.append(Siren(w0=30.0) if siren else nl)
+            sun_v_layers.append(Siren() if siren else nl)
             for i in range(1, 3):
                 sun_v_layers.append(torch.nn.Linear(feat // 2, feat // 2))
                 sun_v_layers.append(nl)
             sun_v_layers.append(torch.nn.Linear(feat // 2, 1))
-            sun_v_layers.append(nn.Softplus())
+            sun_v_layers.append(torch.nn.Sigmoid())
             self.sun_v_net = torch.nn.Sequential(*sun_v_layers)
 
             self.sky_color = torch.nn.Sequential(
@@ -155,9 +155,10 @@ class NeRF(nn.Module):
 
         if siren:
             self.fc_net.apply(sine_init)
-            self.sun_v_net.apply(sine_init)
             self.fc_net[0].apply(first_layer_sine_init)
-            self.sun_v_net[0].apply(first_layer_sine_init)
+            if self.variant == "s-nerf":
+                self.sun_v_net.apply(sine_init)
+                self.sun_v_net[0].apply(first_layer_sine_init)
 
 
     def forward(self, input_xyz, input_dir=None, input_sun_dir=None, sigma_only=False):
@@ -201,12 +202,12 @@ class NeRF(nn.Module):
         # Improvement suggested by Jon Barron to help stability (same paper as soft+ suggestion)
         rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
 
-        out = torch.cat([rgb, sigma], -1)
+        out = torch.cat([rgb, sigma], 1) # (B, 4)
 
         if self.variant == "s-nerf":
             input_sun_v_net = torch.cat([xyz_features, input_sun_dir], -1)
             sun_v = self.sun_v_net(input_sun_v_net)
             sky_color = self.sky_color(input_sun_dir)
-            out = torch.cat([rgb, sigma, sun_v, sky_color], -1)
+            out = torch.cat([out, sun_v, sky_color], 1) # (B, 8)
 
         return out

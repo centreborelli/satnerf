@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from opt import get_opts
 from config import load_config, save_config
 from datasets import load_dataset
-from metrics import load_loss
+from metrics import load_loss, DepthLoss
 from torch.utils.data import DataLoader
 from collections import defaultdict
 
@@ -15,6 +15,8 @@ from rendering import render_rays
 from models import NeRF
 import utils
 import metrics
+import os
+import numpy as np
 
 
 class NeRF_pl(pl.LightningModule):
@@ -27,12 +29,18 @@ class NeRF_pl(pl.LightningModule):
         self.save_hyperparameters(dict(self.conf))
 
         self.loss = load_loss(args)
+        if self.conf.name == "s-nerf":
+            self.loss.lambda_s = self.conf.lambda_s
+        if self.args.depth:
+            self.depth_loss = DepthLoss()
         self.define_models()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0
 
     def define_models(self):
+
+        self.models = {}
 
         self.nerf_coarse = NeRF(layers=self.conf.layers,
                                 feat=self.conf.feat,
@@ -43,7 +51,7 @@ class NeRF_pl(pl.LightningModule):
                                 mapping_sizes=self.conf.mapping_sizes,
                                 variant=self.conf.name)
 
-        self.models = [self.nerf_coarse]
+        self.models['coarse'] = self.nerf_coarse
 
         if self.conf.n_importance > 0:
             self.nerf_fine = NeRF(layers=self.conf.layers,
@@ -55,7 +63,7 @@ class NeRF_pl(pl.LightningModule):
                                   mapping_sizes=self.conf.mapping_sizes,
                                   variant=self.conf.name)
 
-            self.models += [self.nerf_fine]
+            self.models['fine'] = self.nerf_fine
 
     def forward(self, rays):
 
@@ -67,13 +75,8 @@ class NeRF_pl(pl.LightningModule):
             rendered_ray_chunks = \
                 render_rays(self.models,
                             rays[i:i + chunk_size],
-                            N_samples=self.conf.n_samples,
-                            N_importance=self.conf.n_importance,
-                            use_disp=self.conf.training.use_disp,
-                            perturb=self.conf.training.perturb,
-                            noise_std=self.conf.training.noise_std,
-                            chunk=chunk_size,
-                            variant=self.conf.name)
+                            conf=self.conf,
+                            chunk=chunk_size)
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
 
@@ -82,8 +85,8 @@ class NeRF_pl(pl.LightningModule):
         return results
 
     def prepare_data(self):
-        self.train_dataset = load_dataset(self.args, split="train")
-        self.val_dataset = load_dataset(self.args, split="val")
+        self.train_dataset = [] + load_dataset(self.args, split="train")
+        self.val_dataset = [] + load_dataset(self.args, split="val")
 
     def configure_optimizers(self):
 
@@ -98,14 +101,23 @@ class NeRF_pl(pl.LightningModule):
         return [self.optimizer], [scheduler]
 
     def train_dataloader(self):
-        return DataLoader(self.train_dataset,
-                          shuffle=True,
-                          num_workers=4,
-                          batch_size=self.conf.training.bs,
-                          pin_memory=True)
+        a = DataLoader(self.train_dataset[0],
+                       shuffle=True,
+                       num_workers=4,
+                       batch_size=self.conf.training.bs,
+                       pin_memory=True)
+        loaders = {"color": a}
+        if self.args.depth:
+            b = DataLoader(self.train_dataset[1],
+                           shuffle=True,
+                           num_workers=4,
+                           batch_size=self.conf.training.bs,
+                           pin_memory=True)
+            loaders["depth"] = b
+        return loaders
 
     def val_dataloader(self):
-        return DataLoader(self.val_dataset,
+        return DataLoader(self.val_dataset[0],
                           shuffle=False,
                           num_workers=4,
                           batch_size=1,  # validate one image (H*W rays) at a time
@@ -115,15 +127,27 @@ class NeRF_pl(pl.LightningModule):
         self.log("lr", utils.get_learning_rate(self.optimizer))
         self.train_steps += 1
 
-        rays, rgbs = batch["rays"], batch["rgbs"]
+        rays, rgbs = batch["color"]["rays"], batch["color"]["rgbs"]
         results = self(rays)
-        loss = self.loss(results, rgbs)
+        loss, loss_dict = self.loss(results, rgbs)
+        if self.args.depth:
+            tmp = self(batch["depth"]["rays"])
+            kp_depths = torch.flatten(batch["depth"]["depths"][:, 0])
+            kp_weights = None if self.args.depthloss_without_weights else torch.flatten(batch["depth"]["depths"][:, 1])
+            loss_depth, tmp = self.depth_loss(tmp, kp_depths, kp_weights)
+            if self.get_current_epoch(self.train_steps) < self.args.depthloss_drop :
+                loss += loss_depth
+            for k in tmp.keys():
+                loss_dict[k] = tmp[k]
+
         self.log("train/loss", loss)
         typ = "fine" if "rgb_fine" in results else "coarse"
 
         with torch.no_grad():
             psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
             self.log("train/psnr", psnr_)
+        for k in loss_dict.keys():
+            self.log("train/{}".format(k), loss_dict[k])
 
         self.log('train_psnr', psnr_, on_step=True, on_epoch=True, prog_bar=True)
         return {'loss': loss}
@@ -134,7 +158,7 @@ class NeRF_pl(pl.LightningModule):
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
         results = self(rays)
-        loss = self.loss(results, rgbs)
+        loss, loss_dict = self.loss(results, rgbs)
 
         typ = "fine" if "rgb_fine" in results else "coarse"
         W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
@@ -156,15 +180,23 @@ class NeRF_pl(pl.LightningModule):
             depth = results[f"depth_{typ}"]
             out_dir = self.train_im_dir if batch_nb == 0 else self.val_im_dir
             # save depth prediction
-            _, _, alts = self.val_dataset.get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
+            _, _, alts = self.val_dataset[0].get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
             out_path = "{}/depth/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
             utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
             # save dsm
             out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-            dsm = self.val_dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
+            dsm = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
             # save rgb image
             out_path = "{}/rgb/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
             utils.save_output_image(img, out_path, src_path)
+            # save shadow learning images
+            if f"sun_{typ}" in results:
+                s_v = torch.sum(results[f"weights_{typ}"] * results[f"sun_{typ}"], -1)
+                out_path = "{}/sun/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
+                utils.save_output_image(s_v.cpu().reshape(1, H, W), out_path, src_path)
+                rgb_albedo = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'albedo_{typ}'], -2)
+                out_path = "{}/albedo/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
+                utils.save_output_image(rgb_albedo.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
 
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
         ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))
@@ -176,18 +208,33 @@ class NeRF_pl(pl.LightningModule):
         else:
             # 1st image is from the training set, so it must not contribute to the validation metrics
             if batch_nb != 0:
+                aoi_id = batch["src_id"][0][:7]
+                roi_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.txt")
+                gt_dsm_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.tif")
+                if os.path.exists(roi_path) and os.path.exists(gt_dsm_path):
+                    depth = results[f"depth_{typ}"]
+                    out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm.tif")
+                    _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
+                    roi_metadata = np.loadtxt(roi_path)
+                    mae_ = metrics.dsm_mae(out_path, gt_dsm_path, roi_metadata)
+                    os.remove(out_path)
+
                 self.log("val/loss", loss)
                 self.log("val/psnr", psnr_)
                 self.log("val/ssim", ssim_)
+                self.log("val/mae", mae_)
+                for k in loss_dict.keys():
+                    self.log("val/{}".format(k), loss_dict[k])
 
         return {"loss": loss}
 
     def get_current_epoch(self, train_step):
-        return int(train_step // (len(self.train_dataset) // self.conf.training.bs))
+        return int(train_step // (len(self.train_dataset[0]) // self.conf.training.bs))
 
 
 def main():
 
+    torch.cuda.empty_cache()
     args = get_opts()
     system = NeRF_pl(args)
 

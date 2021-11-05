@@ -4,6 +4,10 @@ This script defines the evaluation metrics and the loss functions
 
 import torch
 from kornia.losses import ssim as ssim_
+import os
+import gdal
+import rasterio
+import numpy as np
 
 class ColorLoss(torch.nn.Module):
     def __init__(self, coef=1):
@@ -12,34 +16,59 @@ class ColorLoss(torch.nn.Module):
         self.loss = torch.nn.MSELoss(reduction='mean')
 
     def forward(self, inputs, targets):
-        loss = self.loss(inputs['rgb_coarse'], targets)
+        d = {}
+        d['c_l'] = self.loss(inputs['rgb_coarse'], targets)
         if 'rgb_fine' in inputs:
-            loss += self.loss(inputs['rgb_fine'], targets)
+            d['f_l'] = self.loss(inputs['rgb_fine'], targets)
 
-        return self.coef * loss
+        loss = sum(l for l in d.values())
+        return self.coef * loss, d
 
 class SNerfLoss(torch.nn.Module):
-    def __init__(self, coef=1):
+    def __init__(self, lambda_s=0.05):
         super().__init__()
-        self.coef = coef
-        self.lambda_s = 0.00
-        reduce = 'mean' if self.lambda_s == 0.0 else "sum"
-        self.loss = torch.nn.MSELoss(reduction=reduce)
-
+        self.lambda_s = lambda_s
+        self.loss = torch.nn.MSELoss(reduction='mean')
 
     def forward(self, inputs, targets):
-        term1 = self.loss(inputs['rgb_coarse'], targets)
-        term2 = torch.square(inputs['transparency_coarse'].detach() - inputs['sun_visibility_coarse']).sum(1)
-        term3 = 1 - (inputs['weights_coarse'].detach() * inputs['sun_visibility_coarse']).sum(1)
-        loss = term1 + self.lambda_s * torch.sum(term2 + term3)
+        d = {}
+        d['c_l'] = self.loss(inputs['rgb_coarse'], targets)
+        if self.lambda_s > 0:
+            term2 = torch.square(inputs['trans_sc_coarse'].detach() - inputs['sun_sc_coarse']).sum(1)
+            term3 = 1 - (inputs['weights_sc_coarse'].detach() * inputs['sun_sc_coarse']).sum(1)
+            d['c_sc'] = self.lambda_s * torch.mean(term2 + term3)
 
         if 'rgb_fine' in inputs:
-            term1 = self.loss(inputs['rgb_fine'], targets)
-            term2 = torch.square(inputs['transparency_fine'].detach() - inputs['sun_visibility_fine']).sum(1)
-            term3 = 1 - (inputs['weights_fine'].detach() * inputs['sun_visibility_fine']).sum(1)
-            loss += term1 + self.lambda_s * (term2 + term3)
+            d['f_l'] = self.loss(inputs['rgb_fine'], targets)
+            if self.lambda_s > 0:
+                term2 = torch.square(inputs['trans_sc_fine'].detach() - inputs['sun_sc_fine']).sum(1)
+                term3 = 1 - (inputs['weights_sc_fine'].detach() * inputs['sun_sc_fine']).sum(1)
+                d['f_sc'] = self.lambda_s * torch.mean(term2 + term3)
 
-        return self.coef * loss
+        loss = sum(l for l in d.values())
+        return loss, d
+
+class DepthLoss(torch.nn.Module):
+    def __init__(self, coef=2):
+        super().__init__()
+        self.coef = coef
+        self.loss = torch.nn.MSELoss(reduce=False)
+
+    def forward(self, inputs, targets, weights=None):
+        d = {}
+        d['c_d'] = self.loss(inputs['depth_coarse'], targets)
+        if 'depth_fine' in inputs:
+            d['f_d'] = self.loss(inputs['depth_fine'], targets)
+
+        if weights is None:
+            for k in d.keys():
+                d[k] = torch.mean(d[k])
+        else:
+            for k in d.keys():
+                d[k] = torch.mean(weights * d[k])
+
+        loss = sum(l for l in d.values())
+        return self.coef * loss, d
 
 def load_loss(args):
 
@@ -69,3 +98,52 @@ def ssim(image_pred, image_gt, reduction='mean'):
     important: kornia==0.5.3
     """
     return torch.mean(ssim_(image_pred, image_gt, 3))
+
+def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, fix_xy=False):
+    """
+    in_dsm_path is a string with the path to the NeRF generated dsm
+    gt_dsm_path is a string with the path to the reference lidar dsm
+    bbx_metadata is a 4-valued array with format (x, y, s, r)
+    where [x, y] = offset of the dsm bbx, s = width = height, r = resolution (m per pixel)
+    """
+
+    pred_dsm_path = "tmp_dsm_to_delete.tif"
+    pred_dsm_r_path = "tmp_dsm_r_to_delete.tif"
+
+    # read dsm metadata
+    xoff, yoff = dsm_metadata[0], dsm_metadata[1]
+    xsize, ysize = int(dsm_metadata[2]), int(dsm_metadata[2])
+    resolution = dsm_metadata[3]
+
+    # define projwin for gdal translate
+    ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
+
+    # create dsm using gdal translate
+    ds = gdal.Open(in_dsm_path)
+    ds = gdal.Translate(pred_dsm_path, ds, projWin=[ulx, uly, lrx, lry])
+    ds = None
+    # os.system("gdal_translate -projwin {} {} {} {} {} {}".format(ulx, uly, lrx, lry, source_path, crop_path))
+
+    # read predicted and gt dsms
+    with rasterio.open(gt_dsm_path, "r") as f:
+        gt_dsm = f.read()[0, :, :]
+    with rasterio.open(pred_dsm_path, "r") as f:
+        profile = f.profile
+        pred_dsm = f.read()[0, :, :]
+
+    # register and compute mae
+    if fix_xy:
+        pred_dsm_r = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
+        with rasterio.open(pred_dsm_r_path, 'w', **profile) as dst:
+            dst.write(pred_dsm_r, 1)
+    else:
+        import dsmr
+        transform = dsmr.compute_shift(gt_dsm_path, pred_dsm_path, scaling=False)
+        dsmr.apply_shift(pred_dsm_path, pred_dsm_r_path, *transform)
+        with rasterio.open(pred_dsm_r_path, "r") as f:
+            pred_dsm_r = f.read()[0, :, :]
+
+    os.remove(pred_dsm_path)
+    os.remove(pred_dsm_r_path)
+
+    return np.nanmean(abs(pred_dsm_r - gt_dsm).ravel())

@@ -39,7 +39,7 @@ def get_opts():
     parser.add_argument('--depthloss_drop', type=int, default=10,
                         help='Epoch at which the depth supervision loss should be dropped')
     parser.add_argument('--depthloss_without_weights', action='store_true',
-                        help='Do not use the reprojection errors to weight the depth supervision loss')
+                        help='Do not use reprojection errors to weight depth supervision loss')
     parser.add_argument('--gt_dir', type=str, default=None,
                         help='Directory where the ground truth DSM is located (if available)')
 

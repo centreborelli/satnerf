@@ -5,6 +5,7 @@ from opt import get_opts
 import rpcm
 import json
 import torch
+import os
 
 def save_heatmap_of_reprojection_error(height, width, pts2d, track_err, smooth=20, plot=False):
     """
@@ -94,14 +95,17 @@ def idw_interpolation(pts2d, z, pts2d_query, N=8):
         z_query[known_query_indices] = z[nn_indices[known_query_indices, 0]]
     return z_query
 
-def main():
+def check_depth_supervision_points(run_id, logs_dir, output_dir):
 
-    args = get_opts()
-    sat_dataset = satellite.SatelliteDataset(root_dir=args.root_dir,
-                                             img_dir=args.img_dir if args.img_dir is not None else args.root_dir,
+    log_path = os.path.join(logs_dir, run_id)
+    with open('{}/opts.json'.format(log_path), 'r') as f:
+        args = json.load(f)
+
+    sat_dataset = satellite.SatelliteDataset(root_dir=args["root_dir"],
+                                             img_dir=args["img_dir"] if args["img_dir"] is not None else args["root_dir"],
                                              split="train",
-                                             cache_dir=args.cache_dir,
-                                             img_downscale=args.img_downscale,
+                                             cache_dir=args["cache_dir"],
+                                             img_downscale=args["img_downscale"],
                                              depth=True)
 
     json_files = sat_dataset.json_files
@@ -152,7 +156,7 @@ def main():
         cols, rows = np.meshgrid(np.arange(h), np.arange(w))
         rays = sat_dataset.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
         rays = sat_dataset.normalize_rays(rays)
-        output_path = "./init_dsm_depth_supervision_{}.tif".format(img_id)
+        output_path = os.path.join(output_dir, "{}/init_dsm_depth_supervision_{}.tif".format(run_id, img_id))
         sat_dataset.get_dsm_from_nerf_prediction(rays, init_depth.reshape((-1,1)), dsm_path=output_path)
 
         print("Output file:", output_path)
@@ -160,5 +164,6 @@ def main():
 
     print("done")
 
-if __name__ == "__main__":
-    main()
+if __name__ == '__main__':
+    import fire
+    fire.Fire(check_depth_supervision_points)

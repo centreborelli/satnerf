@@ -5,6 +5,7 @@ This script defines the evaluation metrics and the loss functions
 import torch
 from kornia.losses import ssim as ssim_
 import os
+import shutil
 import gdal
 import rasterio
 import numpy as np
@@ -99,7 +100,7 @@ def ssim(image_pred, image_gt, reduction='mean'):
     """
     return torch.mean(ssim_(image_pred, image_gt, 3))
 
-def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, fix_xy=False):
+def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, out_rdsm_path=None, out_err_path=None):
     """
     in_dsm_path is a string with the path to the NeRF generated dsm
     gt_dsm_path is a string with the path to the reference lidar dsm
@@ -107,8 +108,8 @@ def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, fix_xy=False):
     where [x, y] = offset of the dsm bbx, s = width = height, r = resolution (m per pixel)
     """
 
-    pred_dsm_path = "tmp_dsm_to_delete.tif"
-    pred_dsm_r_path = "tmp_dsm_r_to_delete.tif"
+    pred_dsm_path = "tmp_crop_dsm_to_delete.tif"
+    pred_rdsm_path = "tmp_crop_rdsm_to_delete.tif"
 
     # read dsm metadata
     xoff, yoff = dsm_metadata[0], dsm_metadata[1]
@@ -118,7 +119,7 @@ def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, fix_xy=False):
     # define projwin for gdal translate
     ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
 
-    # create dsm using gdal translate
+    # crop predicted dsm using gdal translate
     ds = gdal.Open(in_dsm_path)
     ds = gdal.Translate(pred_dsm_path, ds, projWin=[ulx, uly, lrx, lry])
     ds = None
@@ -132,18 +133,36 @@ def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, fix_xy=False):
         pred_dsm = f.read()[0, :, :]
 
     # register and compute mae
+    fix_xy = False
     if fix_xy:
-        pred_dsm_r = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
-        with rasterio.open(pred_dsm_r_path, 'w', **profile) as dst:
-            dst.write(pred_dsm_r, 1)
+        pred_rdsm = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
+        with rasterio.open(pred_rdsm_path, 'w', **profile) as dst:
+            dst.write(pred_rdsm, 1)
     else:
         import dsmr
         transform = dsmr.compute_shift(gt_dsm_path, pred_dsm_path, scaling=False)
-        dsmr.apply_shift(pred_dsm_path, pred_dsm_r_path, *transform)
-        with rasterio.open(pred_dsm_r_path, "r") as f:
-            pred_dsm_r = f.read()[0, :, :]
+        dsmr.apply_shift(pred_dsm_path, pred_rdsm_path, *transform)
+        with rasterio.open(pred_rdsm_path, "r") as f:
+            pred_rdsm = f.read()[0, :, :]
+    abs_err = abs(pred_rdsm - gt_dsm)
 
+    # remove tmp files and write output tifs if desired
     os.remove(pred_dsm_path)
-    os.remove(pred_dsm_r_path)
+    if out_rdsm_path is not None:
+        if os.path.exists(out_rdsm_path):
+            os.remove(out_rdsm_path)
+        os.makedirs(os.path.dirname(out_rdsm_path), exist_ok=True)
+        shutil.copyfile(pred_rdsm_path, out_rdsm_path)
+    os.remove(pred_rdsm_path)
+    if out_err_path is not None:
+        if os.path.exists(out_err_path):
+            os.remove(out_err_path)
+        os.makedirs(os.path.dirname(out_err_path), exist_ok=True)
+        with rasterio.open(out_err_path, 'w', **profile) as dst:
+            dst.write(abs_err, 1)
 
-    return np.nanmean(abs(pred_dsm_r - gt_dsm).ravel())
+    return abs_err
+
+def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata):
+    abs_err = dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata)
+    return np.nanmean(abs_err.ravel())

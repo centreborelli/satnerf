@@ -1,0 +1,24 @@
+torch
+torchvision
+pytorch-lightning
+test-tube
+kornia
+opencv-python
+matplotlib
+jupyter
+einops
+torch-optimizer
+rpcm @ git+https://github.com/cmla/rpcm.git@localization-origin
+plyflatten
+utm
+omegaconf
+
+# for mesh
+PyMCubes
+pycollada
+trimesh
+pyglet
+
+# for point cloud
+plyfile
+open3d

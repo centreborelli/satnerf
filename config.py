@@ -21,7 +21,7 @@ class TrainingConfig:
     use_disp: bool = False       # True is buggy with satellite FIXME
 
     lr_scheduler: str = "step"
-    max_steps: int = 100000
+    max_steps: int = 300000
 
 @dataclasses.dataclass
 class DefaultConfig:
@@ -53,7 +53,7 @@ class SNerfBasicConfig:
     training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
 
     layers: int = 8
-    feat: int = 256 #100
+    feat: int = 512 #100
     mapping: bool = False
     siren: bool = True
     n_samples: int = 64
@@ -70,7 +70,9 @@ def load_config(args):
 
     conf = OmegaConf.structured(config_dict[args.config_name])
 
-    #if "s-nerf" in args.config_name:
+    if "s-nerf" in args.config_name:
+        if args.img_downscale == 2:
+            conf.max_steps = 800000
         #conf.training.lr = float(1e-4)
         #conf.training.bs = int(256)
 

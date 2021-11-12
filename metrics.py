@@ -50,7 +50,7 @@ class SNerfLoss(torch.nn.Module):
         return loss, d
 
 class DepthLoss(torch.nn.Module):
-    def __init__(self, coef=2):
+    def __init__(self, coef=1):
         super().__init__()
         self.coef = coef
         self.loss = torch.nn.MSELoss(reduce=False)

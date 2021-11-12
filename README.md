@@ -11,7 +11,7 @@ python3 main.py --exp_name depthx2_newpoints --root_dir /mnt/cdisk/roger/Dataset
 ##
 ### Testing:
 
-Usage: python3 eval_aoi.py run_id logs_dir output_dir epoch_number [checkpoints]
+Usage: python3 eval_aoi.py run_id logs_dir output_dir epoch_number [checkpoints_dir]
 
 Example:
 ```
@@ -29,7 +29,7 @@ It is possible to incorporate depth supervision to the training by using the fol
 
 The script check_depth_supervision_points.py can be used as a sanity check. It produces an interpolated DSM with the initial depths given by the 3D keypoints produced by bundle adjustment.
 
-Usage: python3 eval_aoi.py [run_id] [logs_dir] [output_dir]
+Usage: python3 eval_aoi.py run_id logs_dir output_dir
 
 Example:
 ```
@@ -42,4 +42,17 @@ python3 check_depth_supervision_points.py 2021-11-03_08-00-59_depthx2_newpoints 
 Example:
 ```
 python3 plot_depth_mae.py run_ids.txt /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results /mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth/JAX_068_DSM.tif 50 mae_evolution.png
+```
+
+##
+### Create satellite dataset from the DFC2019 data:
+
+Using bundle adjustment (allows aggregating depth supervision to the NeRF):
+```
+python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068_ba
+```
+
+It is also possible to use `--noba` to create the dataset using the original RPC camera models:
+```
+python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 --noba
 ```

@@ -140,7 +140,7 @@ class SatelliteDataset(Dataset):
                 with open(json_p) as f:
                     d = json.load(f)
                     h, w = int(d["height"] // self.img_downscale), int(d["width"] // self.img_downscale)
-                    rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
+                    rpc = rescale_RPC(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / self.img_downscale)
                     min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
                     cols, rows = np.meshgrid(np.arange(h), np.arange(w))
                     rays = self.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
@@ -220,7 +220,7 @@ class SatelliteDataset(Dataset):
                 rays = torch.load(cache_path)
             else:
                 h, w = int(d["height"] // self.img_downscale), int(d["width"] // self.img_downscale)
-                rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
+                rpc = rescale_RPC(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / self.img_downscale)
                 min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
 
                 # create grid with all pixel coordinates and compute rays
@@ -266,7 +266,7 @@ class SatelliteDataset(Dataset):
 
             pts2d = np.array(d["keypoints"]["2d_coordinates"])/ self.img_downscale
             pts3d = np.array(tie_points[d["keypoints"]["pts3d_indices"], :])
-            rpc = rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / self.img_downscale)
+            rpc = rescale_RPC(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / self.img_downscale)
 
             # build the sparse batch of rays for depth supervision
             cols, rows = pts2d.T
@@ -322,7 +322,7 @@ class SatelliteDataset(Dataset):
             pts2d = np.array(d["keypoints"]["2d_coordinates"])
             pts3d = np.array(tie_points[d["keypoints"]["pts3d_indices"], :])
 
-            rpc = rpcm.RPCModel(d["rpc"])
+            rpc = rpcm.RPCModel(d["rpc"], dict_format="rpcm")
 
             lat, lon, alt = ecef_to_latlon_custom(pts3d[:, 0], pts3d[:, 1], pts3d[:, 2])
             col, row = rpc.projection(lon, lat, alt)

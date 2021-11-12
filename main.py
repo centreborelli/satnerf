@@ -32,7 +32,8 @@ class NeRF_pl(pl.LightningModule):
         if self.conf.name == "s-nerf":
             self.loss.lambda_s = self.conf.lambda_s
         if self.args.depth:
-            self.depth_loss = DepthLoss()
+            self.depth_loss = DepthLoss(coef=self.args.depthloss_lambda)
+            self.depthloss_drop = np.round(self.args.depthloss_drop * self.conf.training.max_steps)
         self.define_models()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
@@ -135,7 +136,7 @@ class NeRF_pl(pl.LightningModule):
             kp_depths = torch.flatten(batch["depth"]["depths"][:, 0])
             kp_weights = None if self.args.depthloss_without_weights else torch.flatten(batch["depth"]["depths"][:, 1])
             loss_depth, tmp = self.depth_loss(tmp, kp_depths, kp_weights)
-            if self.get_current_epoch(self.train_steps) < self.args.depthloss_drop :
+            if self.train_steps < self.depthloss_drop :
                 loss += loss_depth
             for k in tmp.keys():
                 loss_dict[k] = tmp[k]

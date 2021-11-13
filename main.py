@@ -251,7 +251,7 @@ def main():
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,
-                         gpus=[1],
+                         gpus=[args.gpu_id],
                          auto_select_gpus=False,
                          deterministic=True,
                          benchmark=True,

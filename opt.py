@@ -21,6 +21,8 @@ def get_opts():
                         help="Pretrained checkpoint path to load")
     parser.add_argument("--exp_name", type=str, default=None,
                         help="Experiment name")
+    parser.add_argument("--gpu_id", type=int, required=True,
+                        help="GPU that will be used")
 
     # dataset options
     parser.add_argument('--dataset_name', type=str, default='satellite',

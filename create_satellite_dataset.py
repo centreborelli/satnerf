@@ -98,8 +98,8 @@ def create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=False):
 
         src = rio_open(path_to_dsm)
         dsm = src.read()[0, :, :]
-        d["min_alt"] = int(np.round(dsm.min() - 10))
-        d["max_alt"] = int(np.round(dsm.max() + 10))
+        d["min_alt"] = int(np.round(dsm.min() - 1))
+        d["max_alt"] = int(np.round(dsm.max() + 1))
 
         if use_ba:
             # use corrected rpc

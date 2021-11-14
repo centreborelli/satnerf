@@ -38,12 +38,16 @@ def utm_from_latlon(lats, lons):
     """
     import pyproj
     import utm
+    from pyproj import Transformer
 
     n = utm.latlon_to_zone_number(lats[0], lons[0])
     l = utm.latitude_to_zone_letter(lats[0])
     proj_src = pyproj.Proj("+proj=latlong")
     proj_dst = pyproj.Proj("+proj=utm +zone={}{}".format(n, l))
-    return pyproj.transform(proj_src, proj_dst, lons, lats)
+    transformer = Transformer.from_proj(proj_src, proj_dst)
+    easts, norths = transformer.transform(lons, lats)
+    #easts, norths = pyproj.transform(proj_src, proj_dst, lons, lats)
+    return easts, norths
 
 
 def latlon_to_ecef_custom(lat, lon, alt):

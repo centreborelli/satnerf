@@ -44,6 +44,8 @@ def get_opts():
                         help='Do not use reprojection errors to weight depth supervision loss')
     parser.add_argument('--depthloss_lambda', type=float, default=1.0,
                         help='Float that multiplies the sum of depth supervision errors')
+    parser.add_argument('--solarloss_lambda', type=float, default=0.05,
+                        help='Float that multiplies the solar correction loss terms')
     parser.add_argument('--gt_dir', type=str, default=None,
                         help='Directory where the ground truth DSM is located (if available)')
 

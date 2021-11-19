@@ -9,6 +9,7 @@ import shutil
 import gdal
 import rasterio
 import numpy as np
+import datetime
 
 class ColorLoss(torch.nn.Module):
     def __init__(self, coef=1):
@@ -100,7 +101,7 @@ def ssim(image_pred, image_gt, reduction='mean'):
     """
     return torch.mean(ssim_(image_pred, image_gt, 3))
 
-def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, out_rdsm_path=None, out_err_path=None):
+def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None, out_rdsm_path=None, out_err_path=None):
     """
     in_dsm_path is a string with the path to the NeRF generated dsm
     gt_dsm_path is a string with the path to the reference lidar dsm
@@ -108,8 +109,9 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, out_rdsm_pa
     where [x, y] = offset of the dsm bbx, s = width = height, r = resolution (m per pixel)
     """
 
-    pred_dsm_path = "tmp_crop_dsm_to_delete.tif"
-    pred_rdsm_path = "tmp_crop_rdsm_to_delete.tif"
+    unique_identifier = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    pred_dsm_path = "tmp_crop_dsm_to_delete_{}.tif".format(unique_identifier)
+    pred_rdsm_path = "tmp_crop_rdsm_to_delete_{}.tif".format(unique_identifier)
 
     # read dsm metadata
     xoff, yoff = dsm_metadata[0], dsm_metadata[1]
@@ -124,6 +126,18 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, out_rdsm_pa
     ds = gdal.Translate(pred_dsm_path, ds, projWin=[ulx, uly, lrx, lry])
     ds = None
     # os.system("gdal_translate -projwin {} {} {} {} {} {}".format(ulx, uly, lrx, lry, source_path, crop_path))
+    if gt_mask_path is not None:
+        with rasterio.open(gt_mask_path, "r") as f:
+            mask = f.read()[0, :, :]
+            water_mask = mask.copy()
+            water_mask[mask != 9] = 0
+            water_mask[mask == 9] = 1
+        with rasterio.open(pred_dsm_path, "r") as f:
+            profile = f.profile
+            pred_dsm = f.read()[0, :, :]
+        with rasterio.open(pred_dsm_path, 'w', **profile) as dst:
+            pred_dsm[water_mask.astype(bool)] = np.nan
+            dst.write(pred_dsm, 1)
 
     # read predicted and gt dsms
     with rasterio.open(gt_dsm_path, "r") as f:
@@ -163,6 +177,6 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, out_rdsm_pa
 
     return abs_err
 
-def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata):
-    abs_err = dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata)
+def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None):
+    abs_err = dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=gt_mask_path)
     return np.nanmean(abs_err.ravel())

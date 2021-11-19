@@ -217,7 +217,8 @@ class NeRF_pl(pl.LightningModule):
                     out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm.tif")
                     _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
                     roi_metadata = np.loadtxt(roi_path)
-                    mae_ = metrics.dsm_mae(out_path, gt_dsm_path, roi_metadata)
+                    gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS.tif")
+                    mae_ = metrics.dsm_mae(out_path, gt_dsm_path, roi_metadata, gt_mask_path=gt_seg_path)
                     os.remove(out_path)
 
                 self.log("val/loss", loss)

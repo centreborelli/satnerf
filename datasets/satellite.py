@@ -170,7 +170,7 @@ class SatelliteDataset(Dataset):
         # load dataset split
         if self.split == "train":
             with open(os.path.join(self.json_dir, "train.txt"), "r") as f:
-                json_files = f.read().split("\n")[:-1]
+                json_files = f.read().split("\n")
             self.json_files = [os.path.join(self.json_dir, json_p) for json_p in json_files]
             if self.depth:
                 if os.path.exists(self.json_dir + "/pts3d.npy"):

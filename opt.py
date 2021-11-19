@@ -53,6 +53,7 @@ def get_opts():
 
     exp_id = args.config_name if args.exp_name is None else args.exp_name
     args.exp_name = "{}_{}".format(datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S"), exp_id)
+    print("\nRunning {} - Using gpu {}\n".format(args.exp_name, args.gpu_id))
 
     os.makedirs("{}/{}".format(args.logs_dir, args.exp_name), exist_ok=True)
     with open("{}/{}/opts.json".format(args.logs_dir, args.exp_name), "w") as f:

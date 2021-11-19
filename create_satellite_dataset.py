@@ -1,12 +1,10 @@
 import rpcm
 import glob
-from bundle_adjust.cam_utils import SatelliteImage
-from bundle_adjust.ba_pipeline import BundleAdjustmentPipeline
-from bundle_adjust import loader
 import os
 import numpy as np
 import srtm4
 import shutil
+from datasets.satellite import get_file_id
 
 
 def rio_open(*args,**kwargs):
@@ -29,6 +27,10 @@ def get_image_lonlat_aoi(rpc, h, w):
     return geojson_polygon
 
 def run_ba(aoi_id, dfc_dir, output_dir):
+
+    from bundle_adjust.cam_utils import SatelliteImage
+    from bundle_adjust.ba_pipeline import BundleAdjustmentPipeline
+    from bundle_adjust import loader
 
     # load input data
     os.makedirs(output_dir, exist_ok=True)
@@ -103,7 +105,7 @@ def create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=False):
 
         if use_ba:
             # use corrected rpc
-            rpc_path = os.path.join(output_dir, "ba_files/rpcs_adj/{}.rpc_adj".format(loader.get_id(rgb_p)))
+            rpc_path = os.path.join(output_dir, "ba_files/rpcs_adj/{}.rpc_adj".format(get_file_id(rgb_p)))
             d["rpc"] = rpcm.rpc_from_rpc_file(rpc_path).__dict__
             #d_out["rpc"] = rpc_rpcm_to_geotiff_format(rpc.__dict__)
 
@@ -117,7 +119,8 @@ def create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=False):
             # use original rpc
             d["rpc"] = original_rpc.__dict__
 
-        loader.save_dict_to_json(d, os.path.join(output_dir, "{}.json".format(loader.get_id(rgb_p))))
+        with open(os.path.join(output_dir, "{}.json".format(get_file_id(rgb_p))), "w") as f:
+            json.dump(d, f, indent=2)
 
 def create_train_test_splits(input_sample_ids, test_percent=0.15, min_test_samples=2):
 

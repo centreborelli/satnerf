@@ -6,7 +6,7 @@ import torch
 from kornia.losses import ssim as ssim_
 import os
 import shutil
-import gdal
+from osgeo import gdal
 import rasterio
 import numpy as np
 import datetime
@@ -94,7 +94,7 @@ def psnr(image_pred, image_gt, valid_mask=None, reduction='mean'):
     return -10*torch.log10(mse(image_pred, image_gt, valid_mask, reduction))
 
 
-def ssim(image_pred, image_gt, reduction='mean'):
+def ssim(image_pred, image_gt):
     """
     image_pred and image_gt: (1, 3, H, W)
     important: kornia==0.5.3

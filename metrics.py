@@ -148,6 +148,11 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
 
     # register and compute mae
     fix_xy = False
+    try:
+        import dsmr
+    except:
+        print("Warning: dsmr not found ! DSM registration will only use the Z dimension")
+        fix_xy = True
     if fix_xy:
         pred_rdsm = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
         with rasterio.open(pred_rdsm_path, 'w', **profile) as dst:

@@ -21,6 +21,8 @@ conda activate sat-nerf
 ```
 pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio===0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
 ```
+5. It is recommended to install `dsmr`. Otherwise the code will not crash but DSM registration will lose accuracy and affect the estimated altitude MAE.
+
 Extra 1: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code. Example:
 ```
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/mnt/cdisk/roger/miniconda3/envs/sat-nerf/lib

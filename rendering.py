@@ -183,6 +183,7 @@ def render_rays(models,
             irradiance = sun_v.view(N_rays, N_samples_, 1) + (1 - sun_v.view(N_rays, N_samples_, 1)) * sky_rgb
             rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs * irradiance, -2)  # (N_rays, 3)
             depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
+            rgb_final = torch.clamp(rgb_final, min=0., max=1.)
             return rgb_final, depth_final, weights, transparency, sun_v, sky_rgb, rgbs
         else:
             # classic NeRF outputs

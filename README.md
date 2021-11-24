@@ -94,4 +94,12 @@ Example:
 python3 plot_depth_mae.py run_ids.txt /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results /mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth/JAX_068_DSM.tif 50 mae_evolution.png
 ```
 
+
+### 4.4. Compare to s2p
+
+Example:
+```
+python3 eval_s2p.py JAX_068 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 /mnt/cdisk/roger/Datasets/DFC2019
+```
+
 ---

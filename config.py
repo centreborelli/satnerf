@@ -72,7 +72,7 @@ def load_config(args):
 
     if "s-nerf" in args.config_name:
         if args.img_downscale == 2:
-            conf.max_steps = 800000
+            conf.training.max_steps = 800000
         conf.lambda_s = args.solarloss_lambda
         #conf.training.lr = float(1e-4)
         #conf.training.bs = int(256)

@@ -175,11 +175,11 @@ class SatelliteDataset(Dataset):
             if self.depth:
                 if os.path.exists(self.json_dir + "/pts3d.npy"):
                     self.tie_points = np.load(self.json_dir + "/pts3d.npy")
-                    self.all_rays, self.all_depths = self.load_depth_data(self.json_files, self.tie_points, verbose=True)
+                    self.all_rays, self.all_depths, self.all_ids = self.load_depth_data(self.json_files, self.tie_points, verbose=True)
                 else:
                     raise FileNotFoundError("Could not find {}".format(self.json_dir + "/pts3d.npy"))
             else:
-                self.all_rays, self.all_rgbs = self.load_data(self.json_files, verbose=True)
+                self.all_rays, self.all_rgbs, self.all_ids = self.load_data(self.json_files, verbose=True)
         elif self.split == "val":
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
                 json_files = f.read().split("\n")
@@ -187,7 +187,10 @@ class SatelliteDataset(Dataset):
             # add an extra image from the training set to the validation set (for debugging purposes)
             with open(os.path.join(self.json_dir, "train.txt"), "r") as f:
                 json_files = f.read().split("\n")
+            n_train_ims = len(json_files)
+            self.all_ids = [i + n_train_ims for i, j in enumerate(self.json_files)]
             self.json_files = [os.path.join(self.json_dir, json_files[0])] + self.json_files
+            self.all_ids = [0] + self.all_ids
         else:
             pass
 
@@ -205,6 +208,7 @@ class SatelliteDataset(Dataset):
             all_rgbs: (N, 3) tensor of floats encoding all the rgb colors corresponding to N rays
         """
         all_rgbs, all_rays, all_sun_dirs = [], [], []
+        all_ids = []
         for t, json_p in enumerate(json_files):
 
             # read json
@@ -240,23 +244,26 @@ class SatelliteDataset(Dataset):
             # get sun direction
             sun_dirs = self.get_sun_dirs(float(d["sun_elevation"]), float(d["sun_azimuth"]), rays.shape[0])
 
+            all_ids += [t * torch.ones(rays.shape[0], 1)]
             all_rgbs += [rgbs]
             all_rays += [rays]
             all_sun_dirs += [sun_dirs]
             if verbose:
                 print("Image {} loaded ( {} / {} )".format(img_id, t + 1, len(json_files)))
 
+        all_ids = torch.cat(all_ids, 0)
         all_rays = torch.cat(all_rays, 0)  # (len(json_files)*h*w, 8)
         all_rgbs = torch.cat(all_rgbs, 0)  # (len(json_files)*h*w, 3)
         all_sun_dirs = torch.cat(all_sun_dirs, 0)  # (len(json_files)*h*w, 3)
         all_rays = torch.hstack([all_rays, all_sun_dirs])  # (len(json_files)*h*w, 11)
         all_rays = all_rays.type(torch.FloatTensor)
         all_rgbs = all_rgbs.type(torch.FloatTensor)
-        return all_rays, all_rgbs
+        return all_rays, all_rgbs, all_ids
 
     def load_depth_data(self, json_files, tie_points, verbose=False):
 
         all_rays, all_depths, all_sun_dirs, all_weights = [], [], [], []
+        all_ids = []
         kp_weights = self.load_keypoint_weights_for_depth_supervision(json_files, tie_points)
 
         for t, json_p in enumerate(json_files):
@@ -299,7 +306,9 @@ class SatelliteDataset(Dataset):
             all_weights += [current_weights[:, np.newaxis]]
             if verbose:
                 print("Depth {} loaded ( {} / {} )".format(img_id, t + 1, len(json_files)))
+            all_ids += [t * torch.ones(rays.shape[0], 1)]
 
+        all_ids = torch.cat(all_ids, 0)
         all_rays = torch.cat(all_rays, 0)  # (len(json_files)*h*w, 8)
         all_depths = torch.cat(all_depths, 0)  # (len(json_files)*h*w, 1)
         all_weights = torch.cat(all_weights, 0)
@@ -308,8 +317,7 @@ class SatelliteDataset(Dataset):
         all_rays = torch.hstack([all_rays, all_sun_dirs])  # (len(json_files)*h*w, 11)
         all_rays = all_rays.type(torch.FloatTensor)
         all_depths = all_depths.type(torch.FloatTensor)
-
-        return all_rays, all_depths
+        return all_rays, all_depths, all_ids
 
     def load_keypoint_weights_for_depth_supervision(self, json_files, tie_points):
 
@@ -541,9 +549,9 @@ class SatelliteDataset(Dataset):
         # take a batch from the dataset
         if self.split == "train":
             if self.depth:
-                sample = {"rays": self.all_rays[idx], "depths": self.all_depths[idx]}
+                sample = {"rays": self.all_rays[idx], "depths": self.all_depths[idx], "ts": self.all_ids[idx].long()}
             else:
-                sample = {"rays": self.all_rays[idx], "rgbs": self.all_rgbs[idx]}
+                sample = {"rays": self.all_rays[idx], "rgbs": self.all_rgbs[idx], "ts": self.all_ids[idx].long()}
         else:
             json_p = self.json_files[idx]
             with open(json_p) as f:
@@ -553,8 +561,10 @@ class SatelliteDataset(Dataset):
 
             if self.depth:
                 rays, depths = self.load_depth_data([json_p])
-                sample = {"rays": rays, "depths": depths, "src_path": img_p, "src_id": img_id}
+                ts = self.all_ids[idx] * torch.ones(rays.shape[0], 1)
+                sample = {"rays": rays, "depths": depths, "src_path": img_p, "src_id": img_id, "ts": ts.long()}
             else:
-                rays, rgbs = self.load_data([json_p])
-                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id}
+                rays, rgbs, _ = self.load_data([json_p])
+                ts = self.all_ids[idx] * torch.ones(rays.shape[0], 1)
+                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id, "ts": ts.long()}
         return sample

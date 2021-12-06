@@ -76,7 +76,8 @@ class NeRF(nn.Module):
                  skips=[4], siren=False,
                  mapping=True,
                  mapping_sizes=[10, 4],
-                 variant="nerf"):
+                 variant="nerf",
+                 t_embedding_dims=16):
         """
         layers: integer, number of layers for density (sigma) encoder
         feat: integer, number of hidden units in each layer
@@ -96,6 +97,7 @@ class NeRF(nn.Module):
         self.outputs_per_variant = {
             "nerf": 4,  # r, g, b (3) + sigma (1)
             "s-nerf": 8,  # r, g, b (3) + sigma (1) + sun visibility (1) + r, g, b from sky color (3)
+            "s-nerf-w": 11,  # r, g, b (3) + sigma (1) + sun visibility (1) + rgb a (3) + rgb b (3)
         }
 
         # activation function
@@ -134,7 +136,7 @@ class NeRF(nn.Module):
 
         # Shadow-NeRF (s-nerf) additional layers
         self.variant = variant
-        if self.variant == "s-nerf":
+        if self.variant in ["s-nerf", "s-nerf-w"]:
             sun_dir_in_size = 3
             sun_v_layers = []
             sun_v_layers.append(torch.nn.Linear(feat + sun_dir_in_size, feat // 2))
@@ -146,6 +148,7 @@ class NeRF(nn.Module):
             sun_v_layers.append(torch.nn.Sigmoid())
             self.sun_v_net = torch.nn.Sequential(*sun_v_layers)
 
+        if self.variant == "s-nerf":
             self.sky_color = torch.nn.Sequential(
                 torch.nn.Linear(sun_dir_in_size, feat // 2),
                 torch.nn.ReLU(),
@@ -153,15 +156,23 @@ class NeRF(nn.Module):
                 torch.nn.Sigmoid(),
             )
 
+        if self.variant == "s-nerf-w":
+            self.ambient_encoding = torch.nn.Sequential(
+                torch.nn.Linear(t_embedding_dims, feat // 4), nl,
+                torch.nn.Linear(feat // 4, feat // 4), nl
+            )
+            self.ambientA = nn.Sequential(nn.Linear(feat // 4, 3), nn.Sigmoid())
+            self.ambientB = nn.Sequential(nn.Linear(feat // 4, 3), nn.Sigmoid())
+
         if siren:
             self.fc_net.apply(sine_init)
             self.fc_net[0].apply(first_layer_sine_init)
-            if self.variant == "s-nerf":
+            if self.variant in ["s-nerf", "s-nerf-w"]:
                 self.sun_v_net.apply(sine_init)
                 self.sun_v_net[0].apply(first_layer_sine_init)
 
 
-    def forward(self, input_xyz, input_dir=None, input_sun_dir=None, sigma_only=False):
+    def forward(self, input_xyz, input_dir=None, input_sun_dir=None, input_t=None, sigma_only=False):
         """
         Predicts the values rgb, sigma from a batch of input rays
         the input rays are represented as a set of 3d points xyz
@@ -199,15 +210,30 @@ class NeRF(nn.Module):
         else:
             input_xyzdir = xyz_features
         rgb = self.rgb_from_xyzdir(input_xyzdir)
-        # Improvement suggested by Jon Barron to help stability (same paper as soft+ suggestion)
+        # improvement suggested by Jon Barron to help stability (same paper as soft+ suggestion)
         rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
 
         out = torch.cat([rgb, sigma], 1) # (B, 4)
 
         if self.variant == "s-nerf":
+            # shadow nerf outputs
             input_sun_v_net = torch.cat([xyz_features, input_sun_dir], -1)
             sun_v = self.sun_v_net(input_sun_v_net)
             sky_color = self.sky_color(input_sun_dir)
             out = torch.cat([out, sun_v, sky_color], 1) # (B, 8)
+
+        if self.variant == "s-nerf-w":
+            # sat-nerf outputs
+            input_sun_v_net = torch.cat([xyz_features, input_sun_dir], -1)
+            sun_v = self.sun_v_net(input_sun_v_net)
+            if input_t is None:
+                a = torch.ones(sun_v.shape[0], 3).cuda()
+                b = torch.zeros(sun_v.shape[0], 3).cuda()
+            else:
+                ambient_features = self.ambient_encoding(input_t)
+                a = self.ambientA(ambient_features)
+                b = self.ambientB(ambient_features)
+
+            out = torch.cat([out, sun_v, a, b], 1)  # (B, 11)
 
         return out

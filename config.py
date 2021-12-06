@@ -63,10 +63,29 @@ class SNerfBasicConfig:
     mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
     lambda_s: float = 0.05
 
+@dataclasses.dataclass
+class SNerfWBasicConfig:
+    """S-NeRF configuration."""
+
+    name: str = "s-nerf-w"
+    training: TrainingConfig = dataclasses.field(default_factory=TrainingConfig)
+
+    layers: int = 8
+    feat: int = 512 #100
+    mapping: bool = False
+    siren: bool = True
+    n_samples: int = 64
+    n_importance: int = 0
+    skips: list = dataclasses.field(default_factory=lambda: [4])
+    input_sizes: list = dataclasses.field(default_factory=lambda: [3, 0])
+    mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
+    N_vocab: int = 30
+    N_tau: int = 4
+    lambda_s: float = 0.00
 
 def load_config(args):
 
-    config_dict = {"nerf": DefaultConfig, "s-nerf": SNerfBasicConfig}
+    config_dict = {"nerf": DefaultConfig, "s-nerf": SNerfBasicConfig, "s-nerf-w": SNerfWBasicConfig}
 
     conf = OmegaConf.structured(config_dict[args.config_name])
 
@@ -74,6 +93,8 @@ def load_config(args):
         if args.img_downscale == 2:
             conf.training.max_steps = 800000
         conf.lambda_s = args.solarloss_lambda
+        if args.fc_units is not None:
+            conf.feat = int(args.fc_units)
         #conf.training.lr = float(1e-4)
         #conf.training.bs = int(256)
 

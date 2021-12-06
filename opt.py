@@ -15,7 +15,7 @@ def get_opts():
     parser.add_argument("--logs_dir", type=str, default="logs",
                         help="directory to save experiment logs.")
     parser.add_argument("--config_name", type=str, default="s-nerf",
-                        choices=['nerf', 's-nerf'],
+                        choices=['nerf', 's-nerf', 's-nerf-w'],
                         help="NeRF training and model configuration")
     parser.add_argument("--ckpt_path", type=str, default=None,
                         help="Pretrained checkpoint path to load")
@@ -48,6 +48,8 @@ def get_opts():
                         help='Float that multiplies the solar correction loss terms')
     parser.add_argument('--gt_dir', type=str, default=None,
                         help='Directory where the ground truth DSM is located (if available)')
+    parser.add_argument('--fc_units', type=int, default=None,
+                        help='Fully connected units in the main block of layers')
 
     args = parser.parse_args()
 

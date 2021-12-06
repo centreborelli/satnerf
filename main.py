@@ -18,6 +18,7 @@ import metrics
 import os
 import numpy as np
 
+from eval_aoi import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
 
 class NeRF_pl(pl.LightningModule):
     """NeRF network"""
@@ -29,15 +30,20 @@ class NeRF_pl(pl.LightningModule):
         self.save_hyperparameters(dict(self.conf))
 
         self.loss = load_loss(args)
-        if self.conf.name == "s-nerf":
+        if "s-nerf" in self.conf.name:
             self.loss.lambda_s = self.conf.lambda_s
         if self.args.depth:
             self.depth_loss = DepthLoss(coef=self.args.depthloss_lambda)
             self.depthloss_drop = np.round(self.args.depthloss_drop * self.conf.training.max_steps)
+        self.t_embbeding_size = self.conf.N_tau if "N_tau" in dict(self.conf).keys() else 0
         self.define_models()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0
+
+        if self.conf.name == "s-nerf-w":
+            self.embedding_t = torch.nn.Embedding(self.conf.N_vocab, self.conf.N_tau)
+            self.models["t"] = self.embedding_t
 
     def define_models(self):
 
@@ -50,7 +56,8 @@ class NeRF_pl(pl.LightningModule):
                                 siren=self.conf.siren,
                                 mapping=self.conf.mapping,
                                 mapping_sizes=self.conf.mapping_sizes,
-                                variant=self.conf.name)
+                                variant=self.conf.name,
+                                t_embedding_dims=self.t_embbeding_size)
 
         self.models['coarse'] = self.nerf_coarse
 
@@ -62,11 +69,12 @@ class NeRF_pl(pl.LightningModule):
                                   siren=self.conf.siren,
                                   mapping=self.conf.mapping,
                                   mapping_sizes=self.conf.mapping_sizes,
-                                  variant=self.conf.name)
+                                  variant=self.conf.name,
+                                  t_embedding_dims=self.t_embbeding_size)
 
             self.models['fine'] = self.nerf_fine
 
-    def forward(self, rays):
+    def forward(self, rays, ts):
 
         chunk_size = self.conf.training.chunk
         batch_size = rays.shape[0]
@@ -74,10 +82,8 @@ class NeRF_pl(pl.LightningModule):
         results = defaultdict(list)
         for i in range(0, batch_size, chunk_size):
             rendered_ray_chunks = \
-                render_rays(self.models,
-                            rays[i:i + chunk_size],
-                            conf=self.conf,
-                            chunk=chunk_size)
+                render_rays(self.models, self.conf, rays[i:i + chunk_size],
+                            ts[i:i + chunk_size] if ts is not None else None)
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
 
@@ -129,10 +135,11 @@ class NeRF_pl(pl.LightningModule):
         self.train_steps += 1
 
         rays, rgbs = batch["color"]["rays"], batch["color"]["rgbs"]
-        results = self(rays)
+        ts = batch["color"]["ts"].squeeze() if self.conf.name == "s-nerf-w" else None
+        results = self(rays, ts)
         loss, loss_dict = self.loss(results, rgbs)
         if self.args.depth:
-            tmp = self(batch["depth"]["rays"])
+            tmp = self(batch["depth"]["rays"], batch["depth"]["ts"].squeeze())
             kp_depths = torch.flatten(batch["depth"]["depths"][:, 0])
             kp_weights = None if self.args.depthloss_without_weights else torch.flatten(batch["depth"]["depths"][:, 1])
             loss_depth, tmp = self.depth_loss(tmp, kp_depths, kp_weights)
@@ -158,7 +165,15 @@ class NeRF_pl(pl.LightningModule):
         rays, rgbs = batch["rays"], batch["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
-        results = self(rays)
+        if self.conf.name == "s-nerf-w":
+            t = predefined_val_ts(batch["src_id"][0])
+            if t is None:
+                ts = find_best_embbeding_for_val_image(self.models, rays, self.conf, rgbs)
+            else:
+                ts = t * torch.ones(rays.shape[0], 1).long().cuda().squeeze()
+        else:
+            ts = None
+        results = self(rays, ts)
         loss, loss_dict = self.loss(results, rgbs)
 
         typ = "fine" if "rgb_fine" in results else "coarse"
@@ -176,31 +191,8 @@ class NeRF_pl(pl.LightningModule):
         if (batch_nb == 0 or batch_nb == 1) and self.args.dataset_name == 'satellite':
             # save some images to disk for a more detailed visualization
             epoch = self.get_current_epoch(self.train_steps)
-            src_path = batch["src_path"][0]
-            src_id = batch["src_id"][0]
-            depth = results[f"depth_{typ}"]
             out_dir = self.train_im_dir if batch_nb == 0 else self.val_im_dir
-            # save depth prediction
-            _, _, alts = self.val_dataset[0].get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
-            out_path = "{}/depth/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-            utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
-            # save dsm
-            out_path = "{}/dsm/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-            dsm = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
-            # save rgb image
-            out_path = "{}/rgb/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-            utils.save_output_image(img, out_path, src_path)
-            # save shadow learning images
-            if f"sun_{typ}" in results:
-                s_v = torch.sum(results[f"weights_{typ}"] * results[f"sun_{typ}"], -1)
-                out_path = "{}/sun/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-                utils.save_output_image(s_v.cpu().reshape(1, H, W), out_path, src_path)
-                rgb_sky = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'sky_{typ}'], -2)
-                out_path = "{}/sky/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-                utils.save_output_image(rgb_sky.view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
-                rgb_albedo = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'albedo_{typ}'], -2)
-                out_path = "{}/albedo/{}_epoch{}_step{}.tif".format(out_dir, src_id, epoch, self.train_steps)
-                utils.save_output_image(rgb_albedo.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
+            save_nerf_output_to_images(self.val_dataset[0], batch, results, out_dir, epoch)
 
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
         ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))

@@ -75,7 +75,8 @@ class DepthLoss(torch.nn.Module):
 def load_loss(args):
 
     loss_dict = {'nerf': ColorLoss,
-                 's-nerf': SNerfLoss}
+                 's-nerf': SNerfLoss,
+                 's-nerf-w': SNerfLoss}
 
     loss_function = loss_dict[args.config_name]()
     return loss_function

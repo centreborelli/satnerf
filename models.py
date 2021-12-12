@@ -157,12 +157,15 @@ class NeRF(nn.Module):
             )
 
         if self.variant == "s-nerf-w":
+            self.predict_uncertainty = True
             self.ambient_encoding = torch.nn.Sequential(
                 torch.nn.Linear(t_embedding_dims, feat // 4), nl,
                 torch.nn.Linear(feat // 4, feat // 4), nl
             )
             self.ambientA = nn.Sequential(nn.Linear(feat // 4, 3), nn.Sigmoid())
             self.ambientB = nn.Sequential(nn.Linear(feat // 4, 3), nn.Sigmoid())
+            if self.predict_uncertainty:
+                self.beta_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, 1), nn.Softplus())
 
         if siren:
             self.fc_net.apply(sine_init)
@@ -233,7 +236,9 @@ class NeRF(nn.Module):
                 ambient_features = self.ambient_encoding(input_t)
                 a = self.ambientA(ambient_features)
                 b = self.ambientB(ambient_features)
-
             out = torch.cat([out, sun_v, a, b], 1)  # (B, 11)
+            if self.predict_uncertainty:
+                beta = self.beta_from_xyz(xyz_features)
+                out = torch.cat([out, beta], 1) # (B, 12)
 
         return out

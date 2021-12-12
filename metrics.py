@@ -72,6 +72,26 @@ class DepthLoss(torch.nn.Module):
         loss = sum(l for l in d.values())
         return self.coef * loss, d
 
+class SatNerfColorLoss(torch.nn.Module):
+    def __init__(self, coef=1, beta_min=0.05):
+        super().__init__()
+        self.coef = coef
+        self.beta_min = beta_min
+
+    def forward(self, inputs, targets):
+        d = {}
+
+        beta_coarse = torch.sum(inputs['weights_coarse'].unsqueeze(-1) * inputs['beta_coarse'], -2) + self.beta_min
+        d['c_l'] = ((inputs['rgb_coarse'] - targets) ** 2 / (2 * beta_coarse ** 2)).mean()
+        d['c_b'] = (3 + torch.log(beta_coarse).mean())/2  # +3 to make c_b positive since beta_min = 0.05
+
+        if 'rgb_fine' in inputs:
+            beta_fine = torch.sum(inputs['weights_fine'].unsqueeze(-1) * inputs['beta_fine'], -2) + self.beta_min
+            d['f_l'] = ((inputs['rgb_fine'] - targets) ** 2 / (2 * beta_fine ** 2)).mean()
+            d['f_b'] = (3 + torch.log(beta_fine).mean())/2  # +3 to make it positive
+        loss = sum(l for l in d.values())
+        return self.coef * loss, d
+
 def load_loss(args):
 
     loss_dict = {'nerf': ColorLoss,

@@ -154,6 +154,10 @@ def save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number):
             b_rgb = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'ambient_b_{typ}'], -2)
             out_path = "{}/ambient_b/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
             utils.save_output_image(b_rgb.view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
+        if f"beta_{typ}" in results:
+            beta = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'beta_{typ}'], -2)
+            out_path = "{}/beta/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
+            utils.save_output_image(beta.view(1, H, W).cpu(), out_path, src_path)
         if f"sky_{typ}" in results:
             sky_rgb = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'sky_{typ}'], -2)
             out_path = "{}/sky/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
@@ -180,8 +184,8 @@ def find_best_embbeding_for_val_image(models, rays, conf, gt_rgbs, train_indices
 
 def find_best_embeddings_for_val_dataset(val_dataset, models, conf, train_indices):
     print("finding best embedding indices for validation dataset...")
-    list_of_image_indices = []
-    for i in range(len(val_dataset)):
+    list_of_image_indices = [0]
+    for i in np.arange(1, len(val_dataset)):
         sample = val_dataset[i]
         rays, rgbs = sample["rays"].cuda(), sample["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)
@@ -205,7 +209,7 @@ def predefined_val_ts(img_id):
     if aoi_id == "JAX_068":
         d = {"JAX_068_013_RGB": 0,
              "JAX_068_002_RGB": 8,
-             "JAX_068_012_RGB": 3}
+             "JAX_068_012_RGB": 1} #3
     elif aoi_id == "JAX_004":
         d = {"JAX_004_022_RGB": 0,
              "JAX_004_014_RGB": 0,
@@ -216,7 +220,7 @@ def predefined_val_ts(img_id):
 
 
 
-def eval_aoi(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None):
+def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=None):
 
     #gpu_idx = 1
     #run_id = "2021-07-14_00-00-00_snerfw_mask_attempt2"
@@ -229,22 +233,40 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None):
     # load nerf
     if checkpoints_dir is None:
         checkpoints_dir = args["checkpoints_dir"]
-    models, conf = load_nerf(run_id, log_path, checkpoints_dir, epoch_number)
+    models, conf = load_nerf(run_id, log_path, checkpoints_dir, epoch_number-1)
 
     # load dataset
     dataset = SatelliteDataset(args["root_dir"], args["img_dir"], split="val",
                                img_downscale=args["img_downscale"], cache_dir=args["cache_dir"])
 
+    with open(os.path.join(args["root_dir"], "train.txt"), "r") as f:
+        train_jsons = f.read().split("\n")
+        n_train = len(train_jsons)
+
     if conf.name == "s-nerf-w":
+        train_indices = torch.arange(n_train)
+        if split == "val":
+            val_t_indices = find_best_embeddings_for_val_dataset(dataset, models, conf, train_indices)
+        else:
+            val_t_indices = train_indices.numpy()
+    else:
+        if split == "val":
+            val_t_indices = [None]*len(dataset)
+        else:
+            val_t_indices = [None]*n_train
+
+    if split == "train":
         with open(os.path.join(args["root_dir"], "train.txt"), "r") as f:
             json_files = f.read().split("\n")
-        train_indices = torch.arange(len(json_files))
-        val_t_indices = find_best_embeddings_for_val_dataset(dataset, models, conf, train_indices)
+        dataset.json_files = [os.path.join(args["root_dir"], json_p) for json_p in json_files]
+        dataset.all_ids = [i for i, p, in enumerate(dataset.json_files)]
+        samples_to_eval = np.arange(0, len(dataset))
     else:
-        val_t_indices = [None]*len(dataset)
+        samples_to_eval = np.arange(1, len(dataset))
 
     psnr = []
-    for i in np.arange(1, len(dataset)):
+
+    for i in samples_to_eval:
         sample = dataset[i]
         rays, rgbs = sample["rays"].cuda(), sample["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)

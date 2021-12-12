@@ -90,6 +90,8 @@ def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=Non
 
     # retreive outputs
     out_channels = model.outputs_per_variant[variant]
+    if variant == "s-nerf-w" and model.predict_uncertainty:
+        out_channels += 1
     out = out.view(N_rays, N_samples, out_channels)
     rgbs = out[..., :3]  # (N_rays, N_samples, 3)
     sigmas = out[..., 3]  # (N_rays, N_samples)
@@ -100,6 +102,8 @@ def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=Non
         sun_v = out[..., 4:5] # (N_rays, N_samples, 1)
         ambient_a = out[..., 5:8] # (N_rays, N_samples, 3)
         ambient_b = out[..., 8:11] # (N_rays, N_samples, 3)
+        uncertainty = out[..., 11:12] if model.predict_uncertainty else None
+
 
     # define deltas, i.e. the length between the points in which the ray is discretized
     deltas = z_vals[:, 1:] - z_vals[:, :-1]  # (N_rays, N_samples-1)
@@ -143,6 +147,8 @@ def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=Non
                   'sun': sun_v,
                   'ambient_a': ambient_a,
                   'ambient_b': ambient_b}
+        if model.predict_uncertainty:
+            result['beta'] = uncertainty
     else:
         # classic NeRF outputs
         depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)

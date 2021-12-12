@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from opt import get_opts
 from config import load_config, save_config
 from datasets import load_dataset
-from metrics import load_loss, DepthLoss
+from metrics import load_loss, DepthLoss, SatNerfColorLoss
 from torch.utils.data import DataLoader
 from collections import defaultdict
 
@@ -19,6 +19,8 @@ import os
 import numpy as np
 
 from eval_aoi import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 class NeRF_pl(pl.LightningModule):
     """NeRF network"""
@@ -37,6 +39,8 @@ class NeRF_pl(pl.LightningModule):
             self.depthloss_drop = np.round(self.args.depthloss_drop * self.conf.training.max_steps)
         self.t_embbeding_size = self.conf.N_tau if "N_tau" in dict(self.conf).keys() else 0
         self.define_models()
+        if self.conf.name == "s-nerf-w" and self.models["coarse"].predict_uncertainty:
+            self.loss = SatNerfColorLoss()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0
@@ -188,9 +192,9 @@ class NeRF_pl(pl.LightningModule):
                                           stack, self.global_step)
 
         # save output for a training image (batch_nb == 0) and a validation image (batch_nb == 1)
+        epoch = self.get_current_epoch(self.train_steps)
         if (batch_nb == 0 or batch_nb == 1) and self.args.dataset_name == 'satellite':
             # save some images to disk for a more detailed visualization
-            epoch = self.get_current_epoch(self.train_steps)
             out_dir = self.train_im_dir if batch_nb == 0 else self.val_im_dir
             save_nerf_output_to_images(self.val_dataset[0], batch, results, out_dir, epoch)
 

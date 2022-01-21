@@ -217,7 +217,8 @@ class NeRF_pl(pl.LightningModule):
             ts = None
         results = self(rays, ts)
         if "mask" in batch:
-            results["mask"] = batch["mask"]
+            mask = batch["mask"].view(-1, 1)
+            results["mask"] = torch.cat([mask, mask, mask], 1)
         loss, loss_dict = self.loss(results, rgbs)
 
         typ = "fine" if "rgb_fine" in results else "coarse"

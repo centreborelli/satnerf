@@ -19,7 +19,7 @@ class MaskedMSE(torch.nn.Module):
         self.coef = coef
 
     def forward(self, inputs, targets, mask):
-        diff = torch.flatten(torch.sum((inputs - targets) ** 2, -1)) * torch.flatten(mask)
+        diff = torch.flatten( ((inputs - targets) ** 2) * mask)
         return torch.sum(diff) / torch.sum(mask)
 
 
@@ -50,7 +50,6 @@ class SNerfLoss(torch.nn.Module):
         if 'mask' in inputs:
             d['c_l'] = self.loss_with_mask(inputs['rgb_coarse'], targets, inputs['mask'])
         else:
-            print("hoho")
             d['c_l'] = self.loss(inputs['rgb_coarse'], targets)
         if self.lambda_s > 0:
             term2 = torch.square(inputs['trans_sc_coarse'].detach() - inputs['sun_sc_coarse']).sum(1)

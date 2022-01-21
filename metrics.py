@@ -10,6 +10,18 @@ from osgeo import gdal
 import rasterio
 import numpy as np
 import datetime
+from gaussian_filter import GaussianSmoothing
+
+
+class MaskedMSE(torch.nn.Module):
+    def __init__(self, coef=1):
+        super().__init__()
+        self.coef = coef
+
+    def forward(self, inputs, targets, mask):
+        diff = torch.flatten(torch.sum((inputs - targets) ** 2, -1)) * torch.flatten(mask)
+        return torch.sum(diff) / torch.sum(mask)
+
 
 class ColorLoss(torch.nn.Module):
     def __init__(self, coef=1):
@@ -31,10 +43,15 @@ class SNerfLoss(torch.nn.Module):
         super().__init__()
         self.lambda_s = lambda_s
         self.loss = torch.nn.MSELoss(reduction='mean')
+        self.loss_with_mask = MaskedMSE()
 
     def forward(self, inputs, targets):
         d = {}
-        d['c_l'] = self.loss(inputs['rgb_coarse'], targets)
+        if 'mask' in inputs:
+            d['c_l'] = self.loss_with_mask(inputs['rgb_coarse'], targets, inputs['mask'])
+        else:
+            print("hoho")
+            d['c_l'] = self.loss(inputs['rgb_coarse'], targets)
         if self.lambda_s > 0:
             term2 = torch.square(inputs['trans_sc_coarse'].detach() - inputs['sun_sc_coarse']).sum(1)
             term3 = 1 - (inputs['weights_sc_coarse'].detach() * inputs['sun_sc_coarse']).sum(1)
@@ -91,6 +108,51 @@ class SatNerfColorLoss(torch.nn.Module):
             d['f_b'] = (3 + torch.log(beta_fine).mean())/2  # +3 to make it positive
         loss = sum(l for l in d.values())
         return self.coef * loss, d
+
+
+class CustomFilter(torch.nn.Module):
+
+    def __init__(self, kernel_x, kernel_y):
+        super(CustomFilter, self).__init__()
+        self.conv_x = torch.nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=0, bias=False)
+        self.conv_x.weight = torch.nn.Parameter(torch.from_numpy(kernel_x).double().unsqueeze(0).unsqueeze(0))
+        self.conv_y = torch.nn.Conv2d(1, 1, kernel_size=3, stride=1, padding=0, bias=False)
+        self.conv_y.weight = torch.nn.Parameter(torch.from_numpy(kernel_y).double().unsqueeze(0).unsqueeze(0))
+
+    def forward(self, tensor):
+        input_g_x = self.conv_x(tensor)
+        input_g_y = self.conv_y(tensor)
+        return input_g_x[:,:,1:-1,:], input_g_y[:,:,:,1:-1]
+
+
+class PatchesLoss(torch.nn.Module):
+    def __init__(self, coef=1, beta_min=0.05):
+        super().__init__()
+        self.coef = coef
+        self.gaussian_filter = GaussianSmoothing(channels=1, kernel_size=3, sigma=2)
+        self.kernel_x = np.array([[1 / 2, 0, -1 / 2]])
+        self.kernel_y = self.kernel_x.T
+        self.gradient_filter = CustomFilter(self.kernel_x, self.kernel_y)
+
+    def forward(self, inputs, patch_size, patch_real_sizes):
+        d = {}
+
+        d['c_depth_reg'] = []
+        r = 0
+        for tmp in patch_real_sizes:
+            p_h, p_w = tmp[0], tmp[1]
+            patch_depths = inputs['depth_coarse'][r:r+(p_w*p_h)].view(1, 1, p_h, p_w)
+            r += patch_size**2
+            input_g = self.gaussian_filter(patch_depths.double())
+            dx, dy = self.gradient_filter(input_g)
+            grad = torch.abs(dx) + torch.abs(dy)
+            grad = torch.mean(torch.flatten(grad))
+            d['c_depth_reg'].append(grad)
+        d['c_depth_reg'] = 0.1 * torch.sum(torch.stack(d['c_depth_reg']))
+
+        loss = sum(l for l in d.values())
+        return self.coef * loss, d
+
 
 def load_loss(args):
 

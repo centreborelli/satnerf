@@ -214,6 +214,11 @@ def predefined_val_ts(img_id):
         d = {"JAX_004_022_RGB": 0,
              "JAX_004_014_RGB": 0,
              "JAX_004_009_RGB": 5}
+    elif aoi_id == "JAX_214":
+        d = {"JAX_214_020_RGB": 0,
+             "JAX_214_006_RGB": 8,
+             "JAX_214_001_RGB": 18,
+             "JAX_214_008_RGB": 2}
     else:
         return None
     return d[img_id]

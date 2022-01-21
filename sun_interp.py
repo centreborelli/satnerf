@@ -13,7 +13,78 @@ from datetime import datetime
 import warnings
 warnings.filterwarnings("ignore")
 
+import rasterio
+from PIL import Image
+import cv2
 
+def hstack_sun_tifs(img_paths):
+    images = []
+    for p in img_paths:
+        with rasterio.open(p) as f:
+            img = f.read()
+        img = img.transpose(1, 2, 0)
+        h, w = img.shape[:2]
+        row_start, row_end = int(h/4), int(3*h/4)
+        col_start, col_end = int(w/4), int(3*w/4)
+        img = img[row_start:row_end, col_start:col_end]
+        images.append(img)
+    img = np.hstack(images)[:, :, 0]
+    return (img*255).astype(np.uint8) #np.dstack([img, img, img])
+
+def hstack_rgb_tifs(img_paths):
+    images = []
+    for p in img_paths:
+        with rasterio.open(p) as f:
+            img = f.read()
+        img = img.transpose(1, 2, 0)
+        h, w = img.shape[:2]
+        row_start, row_end = int(h/4), int(3*h/4)
+        col_start, col_end = int(w/4), int(3*w/4)
+        img = img[row_start:row_end, col_start:col_end, :]
+        images.append(img)
+    img = np.hstack(images)
+    return (img*255).astype(np.uint8)
+
+def hstack_dsm_tifs_v2(img_paths, cmap=cv2.COLORMAP_CIVIDIS):
+    images = []
+    for p in img_paths:
+        with rasterio.open(p) as f:
+            img = f.read()
+        img = img.transpose(1, 2, 0)
+        h, w = img.shape[:2]
+        row_start, row_end = int(h/4), int(3*h/4)
+        col_start, col_end = int(w/4), int(3*w/4)
+        img = img[row_start:row_end, col_start:col_end, 0]
+        x = img
+        x = np.nan_to_num(x) # change nan to 0
+        mi = np.min(x) # get minimum depth
+        ma = np.max(x)
+        x = (x-mi)/(ma-mi+1e-8) # normalize to 0~1
+        x = (255*x).astype(np.uint8)
+        x = np.clip(x, 0, 255)
+        x_ = cv2.applyColorMap(x, cmap)
+        x_ = cv2.cvtColor(x_, cv2.COLOR_BGR2RGB)
+        images.append(x_)
+    img = np.hstack(images)
+    return img
+
+import sys
+sys.path.append('/home/roger/demtk')
+import iio, demtk
+def hstack_dsm_tifs_v1(img_paths):
+    images = []
+    for p in img_paths:
+        with rasterio.open(p) as f:
+            img = f.read()
+        img = img.transpose(1, 2, 0)
+        h, w = img.shape[:2]
+        row_start, row_end = int(h/4), int(3*h/4)
+        col_start, col_end = int(w/4), int(3*w/4)
+        img = img[row_start:row_end, col_start:col_end, 0]
+        img = demtk.renderclean(img)
+        images.append(img)
+    img = np.hstack(images)
+    return img
 
 def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None):
 
@@ -128,6 +199,30 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
         for p in output_im_paths:
             shutil.move(p, p.replace(".tif", "_solar_incidence_angle_{:.2f}deg.tif".format(solar_incidence_angle)))
         print("solar incidence angle {:.2f} completed ({} of {})".format(solar_incidence_angle, i+1, n_interp))
+
+    # write summary images
+    summary_dir = os.path.join(out_dir, "summary")
+    os.makedirs(summary_dir, exist_ok=True)
+    # sun
+    img_paths = sorted(glob.glob(os.path.join(out_dir, "sun/*.tif")))
+    out_img = Image.fromarray(hstack_sun_tifs(img_paths))
+    out_img.save(os.path.join(summary_dir, "sun.png"))
+    # albedo
+    img_paths = sorted(glob.glob(os.path.join(out_dir, "albedo/*.tif")))
+    out_img = Image.fromarray(hstack_rgb_tifs(img_paths))
+    out_img.save(os.path.join(summary_dir, "albedo.png"))
+    # rgbs
+    img_paths = sorted(glob.glob(os.path.join(out_dir, "rgb/*.tif")))
+    out_img = Image.fromarray(hstack_rgb_tifs(img_paths))
+    out_img.save(os.path.join(summary_dir, "rgb.png"))
+    # depth v1
+    img_paths = sorted(glob.glob(os.path.join(out_dir, "depth/*.tif")))
+    out_img = Image.fromarray(hstack_dsm_tifs_v1(img_paths))
+    out_img.save(os.path.join(summary_dir, "depth_v1.png"))
+    # depth v2
+    img_paths = sorted(glob.glob(os.path.join(out_dir, "depth/*.tif")))
+    out_img = Image.fromarray(hstack_dsm_tifs_v2(img_paths))
+    out_img.save(os.path.join(summary_dir, "depth_v2.png"))
 
 if __name__ == '__main__':
     import fire

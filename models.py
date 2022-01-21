@@ -77,7 +77,8 @@ class NeRF(nn.Module):
                  mapping=True,
                  mapping_sizes=[10, 4],
                  variant="nerf",
-                 t_embedding_dims=16):
+                 t_embedding_dims=16,
+                 predict_uncertainty=False):
         """
         layers: integer, number of layers for density (sigma) encoder
         feat: integer, number of hidden units in each layer
@@ -99,6 +100,7 @@ class NeRF(nn.Module):
             "s-nerf": 8,  # r, g, b (3) + sigma (1) + sun visibility (1) + r, g, b from sky color (3)
             "s-nerf-w": 11,  # r, g, b (3) + sigma (1) + sun visibility (1) + rgb a (3) + rgb b (3)
         }
+        self.predict_uncertainty = predict_uncertainty
 
         # activation function
         nl = Siren() if siren else torch.nn.ReLU()
@@ -157,7 +159,6 @@ class NeRF(nn.Module):
             )
 
         if self.variant == "s-nerf-w":
-            self.predict_uncertainty = True
             self.ambient_encoding = torch.nn.Sequential(
                 torch.nn.Linear(t_embedding_dims, feat // 4), nl,
                 torch.nn.Linear(feat // 4, feat // 4), nl

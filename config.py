@@ -14,7 +14,7 @@ class TrainingConfig:
     bs: int = 1024              # batch size
     workers: int = 4            # number of workers
     weight_decay: float = 0     # weight decay
-    chunk: int = 32*1024        # maximum number of rays to process simultaneously, to regulate memory usage
+    chunk: int = 5*1024        # maximum number of rays to process simultaneously, to regulate memory usage
     perturb: float = 1.0        # factor to perturb depth sampling points
     noise_std: float = 0.0      # std dev of noise added to regularize sigma
     #use_disp: bool = True       # use disparity depth sampling

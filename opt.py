@@ -50,6 +50,12 @@ def get_opts():
                         help='Directory where the ground truth DSM is located (if available)')
     parser.add_argument('--fc_units', type=int, default=None,
                         help='Fully connected units in the main block of layers')
+    parser.add_argument('--patches', action='store_true',
+                        help='Regularize using patches instead of single rays')
+    parser.add_argument('--patch_size', type=int, default=9,
+                        help='Patch size')
+    parser.add_argument('--uncertainty', action='store_true',
+                        help='Predict uncertainty (default is false)')
 
     args = parser.parse_args()
 

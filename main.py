@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from opt import get_opts
 from config import load_config, save_config
 from datasets import load_dataset
-from metrics import load_loss, DepthLoss, SatNerfColorLoss
+from metrics import load_loss, DepthLoss, SatNerfColorLoss, PatchesLoss
 from torch.utils.data import DataLoader
 from collections import defaultdict
 
@@ -34,7 +34,9 @@ class NeRF_pl(pl.LightningModule):
         self.loss = load_loss(args)
         if "s-nerf" in self.conf.name:
             self.loss.lambda_s = self.conf.lambda_s
-        if self.args.depth:
+        if self.args.patches:
+            self.patches_loss = PatchesLoss()
+        elif self.args.depth:
             self.depth_loss = DepthLoss(coef=self.args.depthloss_lambda)
             self.depthloss_drop = np.round(self.args.depthloss_drop * self.conf.training.max_steps)
         self.t_embbeding_size = self.conf.N_tau if "N_tau" in dict(self.conf).keys() else 0
@@ -61,7 +63,8 @@ class NeRF_pl(pl.LightningModule):
                                 mapping=self.conf.mapping,
                                 mapping_sizes=self.conf.mapping_sizes,
                                 variant=self.conf.name,
-                                t_embedding_dims=self.t_embbeding_size)
+                                t_embedding_dims=self.t_embbeding_size,
+                                predict_uncertainty=self.args.uncertainty)
 
         self.models['coarse'] = self.nerf_coarse
 
@@ -74,7 +77,8 @@ class NeRF_pl(pl.LightningModule):
                                   mapping=self.conf.mapping,
                                   mapping_sizes=self.conf.mapping_sizes,
                                   variant=self.conf.name,
-                                  t_embedding_dims=self.t_embbeding_size)
+                                  t_embedding_dims=self.t_embbeding_size,
+                                  predict_uncertainty=self.args.uncertainty)
 
             self.models['fine'] = self.nerf_fine
 
@@ -109,7 +113,13 @@ class NeRF_pl(pl.LightningModule):
         scheduler = utils.get_scheduler(optimizer=self.optimizer,
                                         lr_scheduler=self.conf.training.lr_scheduler,
                                         num_epochs=self.get_current_epoch(self.conf.training.max_steps))
-        return [self.optimizer], [scheduler]
+        return {
+            'optimizer': self.optimizer,
+            'lr_scheduler': {
+                'scheduler': scheduler,
+                'interval': 'epoch'
+            }
+        }
 
     def train_dataloader(self):
         a = DataLoader(self.train_dataset[0],
@@ -118,7 +128,14 @@ class NeRF_pl(pl.LightningModule):
                        batch_size=self.conf.training.bs,
                        pin_memory=True)
         loaders = {"color": a}
-        if self.args.depth:
+        if self.args.patches:
+            b = DataLoader(self.train_dataset[1],
+                           shuffle=True,
+                           num_workers=4,
+                           batch_size=int(self.conf.training.bs//(self.args.patch_size**2)),
+                           pin_memory=True)
+            loaders["patches"] = b
+        elif self.args.depth:
             b = DataLoader(self.train_dataset[1],
                            shuffle=True,
                            num_workers=4,
@@ -138,11 +155,32 @@ class NeRF_pl(pl.LightningModule):
         self.log("lr", utils.get_learning_rate(self.optimizer))
         self.train_steps += 1
 
-        rays, rgbs = batch["color"]["rays"], batch["color"]["rgbs"]
-        ts = batch["color"]["ts"].squeeze() if self.conf.name == "s-nerf-w" else None
+        rays = batch["color"]["rays"] # (B, 11)
+        rgbs = batch["color"]["rgbs"] # (B, 3)
+
+        if self.conf.name == "s-nerf-w":
+            ts = batch["color"]["ts"].squeeze() # (B, 1)
+        else:
+            ts = None
+
         results = self(rays, ts)
+        if "mask" in batch["color"]:
+            results["mask"] = batch["color"]["mask"]
         loss, loss_dict = self.loss(results, rgbs)
-        if self.args.depth:
+
+        if self.args.patches:
+            # remove the batch dimension
+            rays_p, rgbs_p = batch["patches"]["rays"], batch["patches"]["rgbs"]
+            ts_p = batch["patches"]["ts"]
+            rays_p = rays_p.reshape((-1, rays_p.shape[-1]))  # (B * patch_size**2, 11)
+            ts_p = ts_p.reshape((-1, ts_p.shape[-1]))  # (B * patch_size**2, 1)
+            tmp_ = self(rays_p, ts_p.squeeze())
+            patch_lengths = batch["patches"]["patch_size"]
+            loss_patches, tmp = self.patches_loss(tmp_, self.args.patch_size, patch_lengths)
+            loss += loss_patches
+            for k in tmp.keys():
+                loss_dict[k] = tmp[k]
+        elif self.args.depth:
             tmp = self(batch["depth"]["rays"], batch["depth"]["ts"].squeeze())
             kp_depths = torch.flatten(batch["depth"]["depths"][:, 0])
             kp_weights = None if self.args.depthloss_without_weights else torch.flatten(batch["depth"]["depths"][:, 1])
@@ -178,6 +216,8 @@ class NeRF_pl(pl.LightningModule):
         else:
             ts = None
         results = self(rays, ts)
+        if "mask" in batch:
+            results["mask"] = batch["mask"]
         loss, loss_dict = self.loss(results, rgbs)
 
         typ = "fine" if "rgb_fine" in results else "coarse"

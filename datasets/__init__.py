@@ -18,7 +18,17 @@ def load_dataset(args, split):
                      img_downscale=args.img_downscale,
                      depth=False)
         outputs.append(d1)
-        if args.depth and split == 'train':
+        if args.patches and split == 'train':
+            d2 = dataset(root_dir=args.root_dir,
+                         img_dir=args.img_dir if args.img_dir is not None else args.root_dir,
+                         split=split,
+                         cache_dir=args.cache_dir,
+                         img_downscale=args.img_downscale,
+                         depth=False,
+                         patches=True,
+                         patch_size=args.patch_size)
+            outputs.append(d2)
+        elif args.depth and split == 'train':
             d2 = dataset(root_dir=args.root_dir,
                          img_dir=args.img_dir if args.img_dir is not None else args.root_dir,
                          split=split,

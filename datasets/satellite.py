@@ -112,7 +112,7 @@ def rescale_RPC(rpc, alpha):
 
 
 class SatelliteDataset(Dataset):
-    def __init__(self, root_dir, img_dir, split="train", img_downscale=1.0, cache_dir=None, depth=False):
+    def __init__(self, root_dir, img_dir, split="train", img_downscale=1.0, cache_dir=None, depth=False, patches=False, patch_size=5):
         """
         NeRF Satellite Dataset
         Args:
@@ -130,6 +130,9 @@ class SatelliteDataset(Dataset):
         self.img_to_tensor = T.ToTensor()
         self.white_back = False
         self.depth = depth
+        self.generate_patches = patches
+        self.patch_size = patch_size
+        self.patch_overlap = 0.0 # must be in the range [0, 1) where 0 is no overlap between patches
 
         assert os.path.exists(root_dir), "root_dir does not exist"
         assert os.path.exists(img_dir), "img_dir does not exist"
@@ -179,7 +182,21 @@ class SatelliteDataset(Dataset):
                 else:
                     raise FileNotFoundError("Could not find {}".format(self.json_dir + "/pts3d.npy"))
             else:
-                self.all_rays, self.all_rgbs, self.all_ids = self.load_data(self.json_files, verbose=True)
+                self.all_rays, self.all_rgbs, self.all_ids, self.all_masks = self.load_data(self.json_files, verbose=True)
+                self.n_imgs = len(self.json_files)
+                self.img_size = int(np.sqrt(self.all_rgbs.shape[0] // self.n_imgs))
+                self.all_patches = self.prepare_patches_of_ray_indices()
+
+                """
+                # santiy check patch loader
+                idx = 1590414
+                rays, rgbs, (patch_h, patch_w) = self.get_patch_of_rays(idx)
+                img = rgbs.view(patch_h, patch_w, 3).cpu().numpy() * 255
+                a = Image.fromarray(img.astype(np.uint8))
+                a.save(f"pil_test_{idx}.tif")
+                ue += 1
+                """
+
         elif self.split == "val":
             with open(os.path.join(self.json_dir, "test.txt"), "r") as f:
                 json_files = f.read().split("\n")
@@ -208,7 +225,7 @@ class SatelliteDataset(Dataset):
             all_rgbs: (N, 3) tensor of floats encoding all the rgb colors corresponding to N rays
         """
         all_rgbs, all_rays, all_sun_dirs = [], [], []
-        all_ids = []
+        all_ids, all_masks = [], []
         for t, json_p in enumerate(json_files):
 
             # read json
@@ -221,6 +238,13 @@ class SatelliteDataset(Dataset):
 
             # get rgb colors
             rgbs = self.get_rgbs(img_p)
+
+            mask_p = img_p.replace("/Track3-RGB/", "/Track3-Masks/")
+            mask_p = mask_p.replace(".tif", ".png")
+            if os.path.exists(mask_p):
+                mask = self.get_mask(mask_p)
+            else:
+                mask = torch.ones(rgbs.shape[0], 1).type(torch.bool)
 
             # get rays
             cache_path = "{}/{}.data".format(self.cache_dir, img_id)
@@ -248,9 +272,11 @@ class SatelliteDataset(Dataset):
             all_rgbs += [rgbs]
             all_rays += [rays]
             all_sun_dirs += [sun_dirs]
+            all_masks += [mask]
             if verbose:
                 print("Image {} loaded ( {} / {} )".format(img_id, t + 1, len(json_files)))
 
+        all_masks = torch.cat(all_masks, 0)
         all_ids = torch.cat(all_ids, 0)
         all_rays = torch.cat(all_rays, 0)  # (len(json_files)*h*w, 8)
         all_rgbs = torch.cat(all_rgbs, 0)  # (len(json_files)*h*w, 3)
@@ -258,7 +284,7 @@ class SatelliteDataset(Dataset):
         all_rays = torch.hstack([all_rays, all_sun_dirs])  # (len(json_files)*h*w, 11)
         all_rays = all_rays.type(torch.FloatTensor)
         all_rgbs = all_rgbs.type(torch.FloatTensor)
-        return all_rays, all_rgbs, all_ids
+        return all_rays, all_rgbs, all_ids, all_masks
 
     def load_depth_data(self, json_files, tie_points, verbose=False):
 
@@ -366,6 +392,18 @@ class SatelliteDataset(Dataset):
         rgbs = img.view(3, -1).permute(1, 0)  # (h*w, 3)
         rgbs = rgbs.type(torch.FloatTensor)
         return rgbs
+
+    def get_mask(self, mask_path):
+        img = Image.open(mask_path)
+        w, h = img.size
+        if self.img_downscale > 1:
+            w = int(w // self.img_downscale)
+            h = int(h // self.img_downscale)
+            img = img.resize((w, h), Image.NEAREST)
+        img = self.img_to_tensor(img)  # (1, h, w)
+        mask = img.view(1, -1).permute(1, 0)  # (h*w, 1)
+        mask = mask.type(torch.bool)
+        return mask
 
     def get_rays(self, cols, rows, rpc, min_alt, max_alt):
         """
@@ -538,20 +576,66 @@ class SatelliteDataset(Dataset):
 
         return dsm
 
+    def get_patch_of_rays_from_1d_index(self, idx):
+        k, i, j = np.unravel_index(idx, (self.n_imgs, self.img_size, self.img_size))
+        return self.get_patch_of_rays_from_multi_index(k, i, j)
+
+    def get_patch_of_rays_from_multi_index(self, k, i, j):
+        # k = image index
+        # i = center row
+        # j = center column
+        rows = np.hstack([i - np.arange(1, self.patch_size // 2 + 1)[::-1], i, i + np.arange(1, self.patch_size // 2 + 1)])
+        cols = np.hstack([j - np.arange(1, self.patch_size // 2 + 1)[::-1], j, j + np.arange(1, self.patch_size // 2 + 1)])
+        rows = rows[rows >= 0]
+        rows = rows[rows < self.img_size]
+        cols = cols[cols >= 0]
+        cols = cols[cols < self.img_size]
+        cols_, rows_ = np.meshgrid(cols, rows)
+        img_indices = np.array([k]*len(rows_.ravel()))
+        tmp = np.vstack([img_indices.ravel(), rows_.ravel(), cols_.ravel()])
+        patch_indices = np.zeros(self.patch_size**2)
+        valid_patch_indices = np.ravel_multi_index(tmp, (self.n_imgs, self.img_size, self.img_size))
+        n_valid_rays_in_patch = len(rows) * len(cols)
+        patch_indices[:n_valid_rays_in_patch] = valid_patch_indices
+        patch_size = torch.tensor([len(rows), len(cols)])
+        return self.all_rays[patch_indices], self.all_rgbs[patch_indices], patch_size, valid_patch_indices
+
+    def prepare_patches_of_ray_indices(self):
+        window_centers = []
+        for k in np.arange(self.n_imgs):
+            midrows = np.arange(self.patch_size // 2, self.img_size, np.floor(self.patch_size * (1 - self.patch_overlap)))
+            midcols = np.arange(self.patch_size // 2, self.img_size, np.floor(self.patch_size * (1 - self.patch_overlap)))
+            cols, rows = np.meshgrid(midcols.astype(int), midrows.astype(int))
+            window_centers.append(np.vstack([[k]* len(rows.ravel()), rows.ravel(), cols.ravel()]).T)
+        return np.vstack(window_centers)
+
     def __len__(self):
         # compute length of dataset
         if self.split == "train":
-            return self.all_rays.shape[0]
+            if self.generate_patches:
+                return self.all_patches.shape[0]
+            else:
+                return self.all_rays.shape[0]
         else:
             return len(self.json_files)
 
     def __getitem__(self, idx):
         # take a batch from the dataset
         if self.split == "train":
-            if self.depth:
-                sample = {"rays": self.all_rays[idx], "depths": self.all_depths[idx], "ts": self.all_ids[idx].long()}
+            if self.generate_patches:
+                # get the ray corresponding to index == idx + all rays in a neighbor area of (patch_size, patch_size)
+                k, i, j = self.all_patches[idx]
+                rays, rgbs, patch_size, valid_1d_indices = self.get_patch_of_rays_from_multi_index(k, i, j)
+                ts = self.all_ids[valid_1d_indices[0]] * torch.ones(rays.shape[0], 1)
+                sample = {"rays": rays, "rgbs": rgbs, "ts": ts.long(), "patch_size": patch_size}
             else:
-                sample = {"rays": self.all_rays[idx], "rgbs": self.all_rgbs[idx], "ts": self.all_ids[idx].long()}
+                rays = self.all_rays[idx]
+                ts = self.all_ids[idx]
+                if self.depth:
+                    sample = {"rays": rays, "depths": self.all_depths[idx], "ts": ts.long()}
+                else:
+                    sample = {"rays": rays, "rgbs": self.all_rgbs[idx], "ts": ts.long(), "mask": self.all_masks[idx]}
+
         else:
             json_p = self.json_files[idx]
             with open(json_p) as f:
@@ -564,7 +648,7 @@ class SatelliteDataset(Dataset):
                 ts = self.all_ids[idx] * torch.ones(rays.shape[0], 1)
                 sample = {"rays": rays, "depths": depths, "src_path": img_p, "src_id": img_id, "ts": ts.long()}
             else:
-                rays, rgbs, _ = self.load_data([json_p])
+                rays, rgbs, _, mask = self.load_data([json_p])
                 ts = self.all_ids[idx] * torch.ones(rays.shape[0], 1)
-                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id, "ts": ts.long()}
+                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id, "ts": ts.long(), "mask": mask}
         return sample

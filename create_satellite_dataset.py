@@ -4,6 +4,8 @@ import os
 import numpy as np
 import srtm4
 import shutil
+import sys
+import json
 from datasets.satellite import get_file_id
 
 
@@ -44,11 +46,26 @@ def run_ba(aoi_id, dfc_dir, output_dir):
     ba_input_data['images'] = input_images
     print('Input data set!\n')
 
+    # redirect all prints to a bundle adjustment logfile inside the output directory
+    os.makedirs(ba_input_data['out_dir'], exist_ok=True)
+    path_to_log_file = "{}/bundle_adjust.log".format(ba_input_data['out_dir'])
+    print("Running bundle adjustment for RPC model refinement ...")
+    print("Path to log file: {}".format(path_to_log_file))
+    log_file = open(path_to_log_file, "w+")
+    sys.stdout = log_file
+    sys.stderr = log_file
     # run bundle adjustment
-    tracks_config = {'FT_reset': True, 'FT_sift_detection': 's2p', 'FT_sift_matching': 'epipolar_based', "FT_K": 300}
+    #tracks_config = {'FT_reset': True, 'FT_sift_detection': 's2p', 'FT_sift_matching': 'epipolar_based', "FT_K": 300}
+    tracks_config = {'FT_reset': False, 'FT_save': True, 'FT_sift_detection': 's2p', 'FT_sift_matching': 'epipolar_based'}
     ba_extra = {"cam_model": "rpc"}
     ba_pipeline = BundleAdjustmentPipeline(ba_input_data, tracks_config=tracks_config, extra_ba_config=ba_extra)
     ba_pipeline.run()
+    # close logfile
+    sys.stderr = sys.__stderr__
+    sys.stdout = sys.__stdout__
+    log_file.close()
+    print("... done !")
+    print("Path to output files: {}".format(ba_input_data['out_dir']))
 
     # save all bundle adjustment parameters in a temporary directory
     ba_params_dir = os.path.join(ba_pipeline.out_dir, "ba_params")
@@ -72,6 +89,7 @@ def create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=False):
     elif aoi_id[:3] == "OMA":
         path_to_msi = "http://138.231.80.166:2334/core3d/Omaha/WV3/MSI"
     if use_ba:
+        from bundle_adjust import loader
         geotiff_paths = loader.load_list_of_paths(os.path.join(output_dir, "ba_files/ba_params/geotiff_paths.txt"))
         ba_geotiff_basenames = [os.path.basename(x) for x in geotiff_paths]
         ba_kps_pts3d_ind = np.load(os.path.join(output_dir, "ba_files/ba_params/pts_ind.npy"))
@@ -144,19 +162,20 @@ def create_train_test_splits(input_sample_ids, test_percent=0.15, min_test_sampl
 
     return train_samples, test_samples
 
-def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True):
+def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, splits=False):
 
     if ba:
         run_ba(aoi_id, dfc_dir, output_dir)
     create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=ba)
 
     # create train and test splits
-    json_files = [os.path.basename(p) for p in glob.glob(os.path.join(output_dir, "*.json"))]
-    train_samples, test_samples = create_train_test_splits(json_files)
-    with open(os.path.join(output_dir, "train.txt"), "w+") as f:
-        f.write("\n".join(train_samples))
-    with open(os.path.join(output_dir, "test.txt"), "w+") as f:
-        f.write("\n".join(test_samples))
+    if splits:
+        json_files = [os.path.basename(p) for p in glob.glob(os.path.join(output_dir, "*.json"))]
+        train_samples, test_samples = create_train_test_splits(json_files)
+        with open(os.path.join(output_dir, "train.txt"), "w+") as f:
+            f.write("\n".join(train_samples))
+        with open(os.path.join(output_dir, "test.txt"), "w+") as f:
+            f.write("\n".join(test_samples))
 
 if __name__ == '__main__':
     import fire

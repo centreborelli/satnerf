@@ -38,7 +38,7 @@ def get_opts():
                         help='Downscale factor for the input images')
     parser.add_argument('--depth_supervision', dest='depth', action='store_true',
                         help='Use a set of known 3d points to supervise the geometry learning')
-    parser.add_argument('--depthloss_drop', type=float, default=0.1,
+    parser.add_argument('--depthloss_drop', type=float, default=0.2,
                         help='Portion of training steps at which the depth supervision loss should be dropped')
     parser.add_argument('--depthloss_without_weights', action='store_true',
                         help='Do not use reprojection errors to weight depth supervision loss')

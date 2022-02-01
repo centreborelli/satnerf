@@ -52,24 +52,28 @@ class SNerfLoss(torch.nn.Module):
         else:
             d['c_l'] = self.loss(inputs['rgb_coarse'], targets)
         if self.lambda_s > 0:
-            term2 = torch.square(inputs['trans_sc_coarse'].detach() - inputs['sun_sc_coarse']).sum(1)
-            term3 = 1 - (inputs['weights_sc_coarse'].detach() * inputs['sun_sc_coarse']).sum(1)
-            d['c_sc'] = self.lambda_s * torch.mean(term2 + term3)
+            sun_sc = inputs['sun_sc_coarse'].squeeze()
+            term2 = torch.sum(torch.square(inputs['transparency_sc_coarse'].detach() - sun_sc), -1)
+            term3 = 1 - torch.sum(inputs['weights_sc_coarse'].detach() * sun_sc, -1)
+            d['c_sc_term2'] = self.lambda_s * torch.mean(term2)
+            d['c_sc_term3'] = self.lambda_s * torch.mean(term3)
+            #d['c_sc'] = self.lambda_s * torch.mean(term2 + term3)
 
         if 'rgb_fine' in inputs:
             d['f_l'] = self.loss(inputs['rgb_fine'], targets)
             if self.lambda_s > 0:
-                term2 = torch.square(inputs['trans_sc_fine'].detach() - inputs['sun_sc_fine']).sum(1)
-                term3 = 1 - (inputs['weights_sc_fine'].detach() * inputs['sun_sc_fine']).sum(1)
+                sun_sc = inputs['sun_sc_fine'].squeeze()
+                term2 = torch.sum(torch.square(inputs['transparency_sc_fine'].detach() - sun_sc), -1)
+                term3 = 1 - torch.sum(inputs['weights_sc_fine'].detach() * sun_sc, -1)
                 d['f_sc'] = self.lambda_s * torch.mean(term2 + term3)
 
         loss = sum(l for l in d.values())
         return loss, d
 
 class DepthLoss(torch.nn.Module):
-    def __init__(self, coef=1):
+    def __init__(self, lambda_d=1.0):
         super().__init__()
-        self.coef = coef
+        self.lambda_d = lambda_d
         self.loss = torch.nn.MSELoss(reduce=False)
 
     def forward(self, inputs, targets, weights=None):
@@ -80,19 +84,20 @@ class DepthLoss(torch.nn.Module):
 
         if weights is None:
             for k in d.keys():
-                d[k] = torch.mean(d[k])
+                d[k] = self.lambda_d * torch.mean(d[k])
         else:
             for k in d.keys():
-                d[k] = torch.mean(weights * d[k])
+                d[k] = self.lambda_d * torch.mean(weights * d[k])
 
         loss = sum(l for l in d.values())
-        return self.coef * loss, d
+        return loss, d
 
 class SatNerfColorLoss(torch.nn.Module):
-    def __init__(self, coef=1, beta_min=0.05):
+    def __init__(self, coef=1, beta_min=0.05, lambda_s=0.0):
         super().__init__()
         self.coef = coef
         self.beta_min = beta_min
+        self.lambda_s = lambda_s
 
     def forward(self, inputs, targets):
         d = {}
@@ -100,6 +105,12 @@ class SatNerfColorLoss(torch.nn.Module):
         beta_coarse = torch.sum(inputs['weights_coarse'].unsqueeze(-1) * inputs['beta_coarse'], -2) + self.beta_min
         d['c_l'] = ((inputs['rgb_coarse'] - targets) ** 2 / (2 * beta_coarse ** 2)).mean()
         d['c_b'] = (3 + torch.log(beta_coarse).mean())/2  # +3 to make c_b positive since beta_min = 0.05
+
+        if self.lambda_s > 0:
+            sun_sc = inputs['sun_sc_coarse'].squeeze()
+            term2 = torch.square(inputs['transparency_sc_coarse'].detach() - sun_sc).sum(1)
+            term3 = 1 - (inputs['weights_sc_coarse'].detach() * sun_sc).sum(1)
+            d['c_sc'] = self.lambda_s * torch.mean(term2 + term3)
 
         if 'rgb_fine' in inputs:
             beta_fine = torch.sum(inputs['weights_fine'].unsqueeze(-1) * inputs['beta_fine'], -2) + self.beta_min
@@ -245,7 +256,7 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
         dsmr.apply_shift(pred_dsm_path, pred_rdsm_path, *transform)
         with rasterio.open(pred_rdsm_path, "r") as f:
             pred_rdsm = f.read()[0, :, :]
-    abs_err = abs(pred_rdsm - gt_dsm)
+    abs_err = pred_rdsm - gt_dsm
 
     # remove tmp files and write output tifs if desired
     os.remove(pred_dsm_path)
@@ -262,7 +273,7 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
         with rasterio.open(out_err_path, 'w', **profile) as dst:
             dst.write(abs_err, 1)
 
-    return abs_err
+    return abs(abs_err)
 
 def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None):
     abs_err = dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=gt_mask_path)

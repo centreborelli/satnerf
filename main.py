@@ -37,12 +37,12 @@ class NeRF_pl(pl.LightningModule):
         if self.args.patches:
             self.patches_loss = PatchesLoss()
         elif self.args.depth:
-            self.depth_loss = DepthLoss(coef=self.args.depthloss_lambda)
+            self.depth_loss = DepthLoss(lambda_d=self.args.depthloss_lambda)
             self.depthloss_drop = np.round(self.args.depthloss_drop * self.conf.training.max_steps)
         self.t_embbeding_size = self.conf.N_tau if "N_tau" in dict(self.conf).keys() else 0
         self.define_models()
         if self.conf.name == "s-nerf-w" and self.models["coarse"].predict_uncertainty:
-            self.loss = SatNerfColorLoss()
+            self.loss = SatNerfColorLoss(lambda_s=self.conf.lambda_s)
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0

@@ -198,7 +198,6 @@ def render_rays(models,
 
     # run coarse model
     typ = "coarse"
-    result_ = {}
     if variant == "s-nerf":
         sun_d = rays[:, 8:11]
         # render using main set of rays
@@ -206,14 +205,21 @@ def render_rays(models,
         if conf.lambda_s > 0:
             # predict transparency/sun visibility from a secondary set of solar correction rays
             xyz_coarse = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
-            result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d)
-            result_[f'weights_sc_{typ}'] = result["weights"]
-            result_[f'transparency_sc_{typ}'] = result["transparency"]
-            result_[f'sun_sc_{typ}'] = result["sun"]
+            result_ = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=sun_d, sun_d=sun_d)
+            result['weights_sc'] = result_["weights"]
+            result['transparency_sc'] = result_["transparency"]
+            result['sun_sc'] = result_["sun"]
     elif variant == "s-nerf-w":
         sun_d = rays[:, 8:11]
         rays_t_ = models['t'](ts) if ts is not None else None
         result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d, rays_t=rays_t_)
+        if conf.lambda_s > 0:
+            # predict transparency/sun visibility from a secondary set of solar correction rays
+            xyz_coarse = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
+            result_ = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=sun_d, sun_d=sun_d, rays_t=rays_t_)
+            result['weights_sc'] = result_["weights"]
+            result['transparency_sc'] = result_["transparency"]
+            result['sun_sc'] = result_["sun"]
     else:
         result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_)
     result_ = {}

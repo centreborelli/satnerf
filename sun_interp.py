@@ -17,48 +17,71 @@ import rasterio
 from PIL import Image
 import cv2
 
-def hstack_sun_tifs(img_paths):
+def hstack_sun_tifs(img_paths, crop=True):
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
             img = f.read()
         img = img.transpose(1, 2, 0)
-        h, w = img.shape[:2]
-        row_start, row_end = int(h/4), int(3*h/4)
-        col_start, col_end = int(w/4), int(3*w/4)
-        img = img[row_start:row_end, col_start:col_end]
+        if crop:
+            h, w = img.shape[:2]
+            row_start, row_end = int(h/4), int(3*h/4)
+            col_start, col_end = int(w/4), int(3*w/4)
+            img = img[row_start:row_end, col_start:col_end]
         images.append(img)
     img = np.hstack(images)[:, :, 0]
     return (img*255).astype(np.uint8) #np.dstack([img, img, img])
 
-def hstack_rgb_tifs(img_paths):
+def hstack_rgb_tifs(img_paths, crop=True):
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
             img = f.read()
         img = img.transpose(1, 2, 0)
-        h, w = img.shape[:2]
-        row_start, row_end = int(h/4), int(3*h/4)
-        col_start, col_end = int(w/4), int(3*w/4)
-        img = img[row_start:row_end, col_start:col_end, :]
+        if crop:
+            h, w = img.shape[:2]
+            row_start, row_end = int(h/4), int(3*h/4)
+            col_start, col_end = int(w/4), int(3*w/4)
+            img = img[row_start:row_end, col_start:col_end, :]
         images.append(img)
     img = np.hstack(images)
     return (img*255).astype(np.uint8)
 
-def hstack_dsm_tifs_v2(img_paths, cmap=cv2.COLORMAP_CIVIDIS):
+def quickly_interpolate_nans_from_singlechannel_img(image, method='nearest'):
+    from scipy import interpolate
+    h, w = image.shape[:2]
+    xx, yy = np.meshgrid(np.arange(w), np.arange(h))
+    mask = np.isnan(image.reshape(h, w))
+    known_x = xx[~mask]
+    known_y = yy[~mask]
+    known_v = image[~mask]
+    missing_x = xx[mask]
+    missing_y = yy[mask]
+    interp_values = interpolate.griddata(
+        (known_x, known_y), known_v, (missing_x, missing_y), method=method
+    )
+    interp_image = image.copy()
+    interp_image[missing_y, missing_x] = interp_values
+    return interp_image
+
+def hstack_dsm_tifs_v2(img_paths, cmap=cv2.COLORMAP_VIRIDIS, crop=True, vmax=None, vmin=None):
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
             img = f.read()
         img = img.transpose(1, 2, 0)
-        h, w = img.shape[:2]
-        row_start, row_end = int(h/4), int(3*h/4)
-        col_start, col_end = int(w/4), int(3*w/4)
-        img = img[row_start:row_end, col_start:col_end, 0]
+        if crop:
+            h, w = img.shape[:2]
+            row_start, row_end = int(h/4), int(3*h/4)
+            col_start, col_end = int(w/4), int(3*w/4)
+            img = img[row_start:row_end, col_start:col_end, 0]
         x = img
-        x = np.nan_to_num(x) # change nan to 0
-        mi = np.min(x) # get minimum depth
-        ma = np.max(x)
+        from scipy import interpolate
+        #x = np.nan_to_num(x) # change nan to 0
+        x = quickly_interpolate_nans_from_singlechannel_img(x)
+        mi = np.min(x) if vmin is None else vmin
+        ma = np.max(x) if vmax is None else vmax
+        x = np.clip(x, mi, ma)
         x = (x-mi)/(ma-mi+1e-8) # normalize to 0~1
         x = (255*x).astype(np.uint8)
         x = np.clip(x, 0, 255)
@@ -71,16 +94,17 @@ def hstack_dsm_tifs_v2(img_paths, cmap=cv2.COLORMAP_CIVIDIS):
 import sys
 sys.path.append('/home/roger/demtk')
 import iio, demtk
-def hstack_dsm_tifs_v1(img_paths):
+def hstack_dsm_tifs_v1(img_paths, crop=True):
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
             img = f.read()
-        img = img.transpose(1, 2, 0)
-        h, w = img.shape[:2]
-        row_start, row_end = int(h/4), int(3*h/4)
-        col_start, col_end = int(w/4), int(3*w/4)
-        img = img[row_start:row_end, col_start:col_end, 0]
+        img = img.transpose(1, 2, 0)[:, :, 0]
+        if crop:
+            h, w = img.shape[:2]
+            row_start, row_end = int(h/4), int(3*h/4)
+            col_start, col_end = int(w/4), int(3*w/4)
+            img = img[row_start:row_end, col_start:col_end]
         img = demtk.renderclean(img)
         images.append(img)
     img = np.hstack(images)
@@ -150,7 +174,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
     # load nerf
     if checkpoints_dir is None:
         checkpoints_dir = args["checkpoints_dir"]
-    models, conf = load_nerf(run_id, log_path, checkpoints_dir, epoch_number-1)
+    models, conf = load_nerf(run_id, log_path, checkpoints_dir, epoch_number-1, args)
 
     # select ts if s-nerf-w
     if conf.name == "s-nerf-w":
@@ -169,7 +193,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
         ts = None
 
     # run nerf for a range of vectors interpolated between solar direction bounds
-    n_interp = 5
+    n_interp = 10
     for i, alpha in enumerate(np.linspace(0, 1, n_interp)):
 
         # define current solar incidence angle

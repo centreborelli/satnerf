@@ -123,7 +123,7 @@ def check_depth_supervision_points(run_id, logs_dir, output_dir):
 
         pts2d = np.array(d["keypoints"]["2d_coordinates"]) / sat_dataset.img_downscale
         pts3d = np.array(tie_points[d["keypoints"]["pts3d_indices"], :])
-        rpc = satellite.rescale_RPC(rpcm.RPCModel(d["rpc"]), 1.0 / sat_dataset.img_downscale)
+        rpc = satellite.rescale_RPC(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / sat_dataset.img_downscale)
 
         # build the sparse batch of rays for depth supervision
         cols, rows = pts2d.T
@@ -158,6 +158,19 @@ def check_depth_supervision_points(run_id, logs_dir, output_dir):
         rays = sat_dataset.normalize_rays(rays)
         output_path = os.path.join(output_dir, "{}/init_dsm_depth_supervision_{}.tif".format(run_id, img_id))
         sat_dataset.get_dsm_from_nerf_prediction(rays, init_depth.reshape((-1,1)), dsm_path=output_path)
+
+        # crop within gt area of interest
+        from osgeo import gdal
+        aoi_id = img_id[:7]
+        dsm_metadata = np.loadtxt(os.path.join(args["gt_dir"], aoi_id + "_DSM.txt"))
+        xoff, yoff = dsm_metadata[0], dsm_metadata[1]
+        xsize, ysize = int(dsm_metadata[2]), int(dsm_metadata[2])
+        resolution = dsm_metadata[3]
+        ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
+        ds = gdal.Open(output_path)
+        crop_dsm_path = os.path.join(output_dir, "{}/init_dsm_depth_supervision_{}_crop.tif".format(run_id, img_id))
+        ds = gdal.Translate(crop_dsm_path, ds, projWin=[ulx, uly, lrx, lry])
+        ds = None
 
         print("Output file:", output_path)
         break

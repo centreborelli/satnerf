@@ -160,13 +160,15 @@ class NeRF(nn.Module):
 
         if self.variant == "s-nerf-w":
             self.ambient_encoding = torch.nn.Sequential(
-                torch.nn.Linear(t_embedding_dims, feat // 4), nl,
-                torch.nn.Linear(feat // 4, feat // 4), nl
+                torch.nn.Linear(t_embedding_dims, feat // 2), nl,
+                torch.nn.Linear(feat // 2, feat // 2), nl
             )
-            self.ambientA = nn.Sequential(nn.Linear(feat // 4, 3), nn.Sigmoid())
-            self.ambientB = nn.Sequential(nn.Linear(feat // 4, 3), nn.Sigmoid())
+            self.ambientA = nn.Sequential(nn.Linear(feat // 2, 3), nn.Sigmoid())
+            self.ambientB = nn.Sequential(nn.Linear(feat // 2, 3), nn.Sigmoid())
             if self.predict_uncertainty:
-                self.beta_from_xyz = torch.nn.Sequential(torch.nn.Linear(feat, 1), nn.Softplus())
+                self.beta_from_xyz = torch.nn.Sequential(
+                    torch.nn.Linear(t_embedding_dims + feat, feat // 2), nl,
+                    torch.nn.Linear(feat // 2, 1), nn.Softplus())
 
         if siren:
             self.fc_net.apply(sine_init)
@@ -239,7 +241,8 @@ class NeRF(nn.Module):
                 b = self.ambientB(ambient_features)
             out = torch.cat([out, sun_v, a, b], 1)  # (B, 11)
             if self.predict_uncertainty:
-                beta = self.beta_from_xyz(xyz_features)
+                input_for_beta = torch.cat([xyz_features, input_t], -1)
+                beta = self.beta_from_xyz(input_for_beta)
                 out = torch.cat([out, beta], 1) # (B, 12)
 
         return out

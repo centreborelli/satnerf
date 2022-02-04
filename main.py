@@ -234,7 +234,8 @@ class NeRF_pl(pl.LightningModule):
 
         # save output for a training image (batch_nb == 0) and a validation image (batch_nb == 1)
         epoch = self.get_current_epoch(self.train_steps)
-        if (batch_nb == 0 or batch_nb == 1) and self.args.dataset_name == 'satellite':
+        save = not bool(epoch % self.args.save_every_n_epochs)
+        if (batch_nb == 0 or batch_nb == 1) and self.args.dataset_name == 'satellite' and save:
             # save some images to disk for a more detailed visualization
             out_dir = self.train_im_dir if batch_nb == 0 else self.val_im_dir
             save_nerf_output_to_images(self.val_dataset[0], batch, results, out_dir, epoch)
@@ -293,7 +294,8 @@ def main():
                                                  filename="{epoch:d}",
                                                  monitor="val/psnr",
                                                  mode="max",
-                                                 save_top_k=-1)
+                                                 save_top_k=-1,
+                                                 every_n_val_epochs=args.save_every_n_epochs)
 
     trainer = pl.Trainer(max_steps=system.conf.training.max_steps,
                          logger=logger,

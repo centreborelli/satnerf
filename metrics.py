@@ -65,7 +65,9 @@ class SNerfLoss(torch.nn.Module):
                 sun_sc = inputs['sun_sc_fine'].squeeze()
                 term2 = torch.sum(torch.square(inputs['transparency_sc_fine'].detach() - sun_sc), -1)
                 term3 = 1 - torch.sum(inputs['weights_sc_fine'].detach() * sun_sc, -1)
-                d['f_sc'] = self.lambda_s * torch.mean(term2 + term3)
+                d['f_sc_term2'] = self.lambda_s * torch.mean(term2)
+                d['f_sc_term3'] = self.lambda_s * torch.mean(term3)
+                #d['f_sc'] = self.lambda_s * torch.mean(term2 + term3)
 
         loss = sum(l for l in d.values())
         return loss, d

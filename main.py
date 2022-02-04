@@ -249,17 +249,24 @@ class NeRF_pl(pl.LightningModule):
         else:
             # 1st image is from the training set, so it must not contribute to the validation metrics
             if batch_nb != 0:
-                aoi_id = batch["src_id"][0][:7]
-                roi_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.txt")
-                gt_dsm_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.tif")
-                if os.path.exists(roi_path) and os.path.exists(gt_dsm_path):
-                    depth = results[f"depth_{typ}"]
-                    out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm.tif")
-                    _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
-                    roi_metadata = np.loadtxt(roi_path)
-                    gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS.tif")
-                    mae_ = metrics.dsm_mae(out_path, gt_dsm_path, roi_metadata, gt_mask_path=gt_seg_path)
-                    os.remove(out_path)
+                # compute MAE
+                try:
+                    aoi_id = batch["src_id"][0][:7]
+                    roi_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.txt")
+                    gt_dsm_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.tif")
+                    if os.path.exists(roi_path) and os.path.exists(gt_dsm_path):
+                        depth = results[f"depth_{typ}"]
+                        out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm.tif")
+                        _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
+                        roi_metadata = np.loadtxt(roi_path)
+                        if aoi_id == "JAX_004":
+                            gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS_v2.tif")
+                        else:
+                            gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS.tif")
+                        mae_ = metrics.dsm_mae(out_path, gt_dsm_path, roi_metadata, gt_mask_path=gt_seg_path)
+                        os.remove(out_path)
+                except:
+                    mae_ = np.nan
 
                 self.log("val/loss", loss)
                 self.log("val/psnr", psnr_)

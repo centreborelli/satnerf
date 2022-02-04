@@ -260,7 +260,7 @@ class NeRF_pl(pl.LightningModule):
                         out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm.tif")
                         _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
                         roi_metadata = np.loadtxt(roi_path)
-                        if aoi_id == "JAX_004":
+                        if aoi_id in ["JAX_004", "JAX_260"]:
                             gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS_v2.tif")
                         else:
                             gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS.tif")

@@ -17,6 +17,7 @@ import utils
 import metrics
 import os
 import numpy as np
+import datetime
 
 from eval_aoi import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
 
@@ -222,7 +223,10 @@ class NeRF_pl(pl.LightningModule):
         loss, loss_dict = self.loss(results, rgbs)
 
         typ = "fine" if "rgb_fine" in results else "coarse"
-        W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
+        if "h" in batch and "w" in batch:
+            W, H = batch["w"], batch["h"]
+        else:
+            W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float())) # assume squared images
         img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
         img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
         depth = utils.visualize_depth(results[f'depth_{typ}'].view(H, W))  # (3, H, W)
@@ -257,7 +261,8 @@ class NeRF_pl(pl.LightningModule):
                     gt_dsm_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.tif")
                     if os.path.exists(roi_path) and os.path.exists(gt_dsm_path):
                         depth = results[f"depth_{typ}"]
-                        out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm.tif")
+                        unique_identifier = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                        out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm_{}.tif".format(unique_identifier))
                         _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
                         roi_metadata = np.loadtxt(roi_path)
                         if aoi_id in ["JAX_004", "JAX_260"]:

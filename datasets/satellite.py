@@ -149,7 +149,7 @@ class SatelliteDataset(Dataset):
                     h, w = int(d["height"] // self.img_downscale), int(d["width"] // self.img_downscale)
                     rpc = rescale_RPC(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / self.img_downscale)
                     min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
-                    cols, rows = np.meshgrid(np.arange(h), np.arange(w))
+                    cols, rows = np.meshgrid(np.arange(w), np.arange(h))
                     rays = self.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
                     all_rays += [rays]
                 all_rays = torch.cat(all_rays, 0)
@@ -256,7 +256,7 @@ class SatelliteDataset(Dataset):
                 min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
 
                 # create grid with all pixel coordinates and compute rays
-                cols, rows = np.meshgrid(np.arange(h), np.arange(w))
+                cols, rows = np.meshgrid(np.arange(w), np.arange(h))
                 rays = self.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
                 if self.cache_dir is not None:
                     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
@@ -642,13 +642,14 @@ class SatelliteDataset(Dataset):
                 d = json.load(f)
             img_p = os.path.join(self.img_dir, d["img"])
             img_id = get_file_id(d["img"])
+            h, w = int(d["height"] // self.img_downscale), int(d["width"] // self.img_downscale)
 
             if self.depth:
                 rays, depths = self.load_depth_data([json_p])
                 ts = self.all_ids[idx] * torch.ones(rays.shape[0], 1)
-                sample = {"rays": rays, "depths": depths, "src_path": img_p, "src_id": img_id, "ts": ts.long()}
+                sample = {"rays": rays, "depths": depths, "src_path": img_p, "src_id": img_id, "ts": ts.long(), "h": h, "w": w}
             else:
                 rays, rgbs, _, mask = self.load_data([json_p])
                 ts = self.all_ids[idx] * torch.ones(rays.shape[0], 1)
-                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id, "ts": ts.long(), "mask": mask}
+                sample = {"rays": rays, "rgbs": rgbs, "src_path": img_p, "src_id": img_id, "ts": ts.long(), "mask": mask, "h": h, "w": w}
         return sample

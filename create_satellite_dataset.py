@@ -7,6 +7,7 @@ import shutil
 import sys
 import json
 from datasets.satellite import get_file_id
+import rasterio
 
 
 def rio_open(*args,**kwargs):
@@ -28,7 +29,7 @@ def get_image_lonlat_aoi(rpc, h, w):
     geojson_polygon["center"] = [x_c, y_c]
     return geojson_polygon
 
-def run_ba(aoi_id, dfc_dir, output_dir):
+def run_ba(img_dir, output_dir):
 
     from bundle_adjust.cam_utils import SatelliteImage
     from bundle_adjust.ba_pipeline import BundleAdjustmentPipeline
@@ -36,7 +37,6 @@ def run_ba(aoi_id, dfc_dir, output_dir):
 
     # load input data
     os.makedirs(output_dir, exist_ok=True)
-    img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
     myimages = sorted(glob.glob(img_dir + "/*.tif"))
     myrpcs = [rpcm.rpc_from_geotiff(p) for p in myimages]
     input_images = [SatelliteImage(fn, rpc) for fn, rpc in zip(myimages, myrpcs)]
@@ -77,7 +77,7 @@ def run_ba(aoi_id, dfc_dir, output_dir):
     fnames_in_use = [ba_pipeline.images[idx].geotiff_path for idx in ba_pipeline.ba_params.cam_prev_indices]
     loader.save_list_of_paths(os.path.join(ba_params_dir, "geotiff_paths.txt"), fnames_in_use)
 
-def create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=False):
+def create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_ba=False):
 
     # create a json file of metadata for each input image
     # contains: h, w, rpc, sun elevation, sun azimuth, acquisition date
@@ -96,7 +96,6 @@ def create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=False):
         ba_kps_cam_ind = np.load(os.path.join(output_dir, "ba_files/ba_params/cam_ind.npy"))
         ba_kps_pts2d = np.load(os.path.join(output_dir, "ba_files/ba_params/pts2d.npy"))
     else:
-        img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
         geotiff_paths = sorted(glob.glob(img_dir + "/*.tif"))
 
     for rgb_p in geotiff_paths:
@@ -162,11 +161,55 @@ def create_train_test_splits(input_sample_ids, test_percent=0.15, min_test_sampl
 
     return train_samples, test_samples
 
-def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, splits=False):
+def read_DFC2019_lonlat_aoi(aoi_id, dfc_dir):
+    from bundle_adjust import geo_utils
+    if aoi_id[:3] == "JAX":
+        zonestring = "17R"
+    else:
+        raise ValueError("AOI not valid. Expected JAX_(3digits) but received {}".format(aoi_id))
+    roi = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/" + aoi_id + "_DSM.txt"))
+    xoff, yoff, xsize, ysize, resolution = roi[0], roi[1], int(roi[2]), int(roi[2]), roi[3]
+    ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
+    xmin, xmax, ymin, ymax = ulx, lrx, uly, lry
+    easts = [xmin, xmin, xmax, xmax, xmin]
+    norths = [ymin, ymax, ymax, ymin, ymin]
+    lons, lats = geo_utils.lonlat_from_utm(easts, norths, zonestring)
+    lonlat_bbx = geo_utils.geojson_polygon(np.vstack((lons, lats)).T)
+    return lonlat_bbx
 
+def crop_geotiff_lonlat_aoi(geotiff_path, output_path, lonlat_aoi):
+    with rasterio.open(geotiff_path, 'r') as src:
+        profile = src.profile
+        tags = src.tags()
+    crop, x, y = rpcm.utils.crop_aoi(geotiff_path, lonlat_aoi)
+    rpc = rpcm.rpc_from_geotiff(geotiff_path)
+    rpc.row_offset -= y
+    rpc.col_offset -= x
+    profile["height"] = crop.shape[1]
+    profile["width"] = crop.shape[2]
+    with rasterio.open(output_path, 'w', **profile) as dst:
+        dst.write(crop)
+        dst.update_tags(**tags)
+        dst.update_tags(ns='RPC', **rpc.to_geotiff_dict())
+
+
+def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, crop_aoi=True, splits=False):
+
+    if crop_aoi:
+        # preare crops
+        aoi_lonlat = read_DFC2019_lonlat_aoi(aoi_id, dfc_dir)
+        crops_dir = os.path.join(output_dir, "crops")
+        os.makedirs(crops_dir, exist_ok=True)
+        img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
+        myimages = sorted(glob.glob(img_dir + "/*.tif"))
+        for geotiff_path in myimages:
+            crop_geotiff_lonlat_aoi(geotiff_path, os.path.join(crops_dir, os.path.basename(geotiff_path)), aoi_lonlat)
+        img_dir = crops_dir
+    else:
+        img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
     if ba:
-        run_ba(aoi_id, dfc_dir, output_dir)
-    create_dataset_from_DFC2019_data(aoi_id, dfc_dir, output_dir, use_ba=ba)
+        run_ba(img_dir, output_dir)
+    create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_ba=ba)
 
     # create train and test splits
     if splits:

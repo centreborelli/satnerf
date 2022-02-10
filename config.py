@@ -62,6 +62,8 @@ class SNerfBasicConfig:
     input_sizes: list = dataclasses.field(default_factory=lambda: [3, 0])
     mapping_sizes: list = dataclasses.field(default_factory=lambda: [10, 4])
     lambda_s: float = 0.05
+    N_vocab: int = 30
+    N_tau: int = 4
 
 @dataclasses.dataclass
 class SNerfWBasicConfig:

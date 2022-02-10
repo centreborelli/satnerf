@@ -158,7 +158,7 @@ class NeRF_pl(pl.LightningModule):
         rays = batch["color"]["rays"] # (B, 11)
         rgbs = batch["color"]["rgbs"] # (B, 3)
 
-        if self.conf.name == "s-nerf-w":
+        if self.conf.name in ["s-nerf-w", "s-nerf"] and self.args.uncertainty:
             ts = batch["color"]["ts"].squeeze() # (B, 1)
         else:
             ts = None
@@ -207,7 +207,7 @@ class NeRF_pl(pl.LightningModule):
         rays, rgbs = batch["rays"], batch["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
-        if self.conf.name == "s-nerf-w":
+        if self.conf.name == "s-nerf-w" or (self.conf.name == "s-nerf" and self.args.uncertainty):
             t = predefined_val_ts(batch["src_id"][0])
             if t is None:
                 ts = find_best_embbeding_for_val_image(self.models, rays, self.conf, rgbs)

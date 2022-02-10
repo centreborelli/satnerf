@@ -48,6 +48,10 @@ def get_opts():
                         help='Float that multiplies the sum of depth supervision errors')
     parser.add_argument('--solarloss_lambda', type=float, default=0.05,
                         help='Float that multiplies the solar correction loss terms')
+    parser.add_argument('--init_lr', type=float, default=None,
+                        help='Initial learning rate')
+    parser.add_argument('--training_iters', type=int, default=300000,
+                        help='Training iterations')
     parser.add_argument('--gt_dir', type=str, default=None,
                         help='Directory where the ground truth DSM is located (if available)')
     parser.add_argument('--fc_units', type=int, default=None,

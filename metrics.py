@@ -110,9 +110,10 @@ class SatNerfColorLoss(torch.nn.Module):
 
         if self.lambda_s > 0:
             sun_sc = inputs['sun_sc_coarse'].squeeze()
-            term2 = torch.square(inputs['transparency_sc_coarse'].detach() - sun_sc).sum(1)
-            term3 = 1 - (inputs['weights_sc_coarse'].detach() * sun_sc).sum(1)
-            d['c_sc'] = self.lambda_s * torch.mean(term2 + term3)
+            term2 = torch.sum(torch.square(inputs['transparency_sc_coarse'].detach() - sun_sc), -1)
+            term3 = 1 - torch.sum(inputs['weights_sc_coarse'].detach() * sun_sc, -1)
+            d['c_sc_term2'] = self.lambda_s * torch.mean(term2)
+            d['c_sc_term3'] = self.lambda_s * torch.mean(term3)
 
         if 'rgb_fine' in inputs:
             beta_fine = torch.sum(inputs['weights_fine'].unsqueeze(-1) * inputs['beta_fine'], -2) + self.beta_min

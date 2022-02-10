@@ -11,7 +11,7 @@ from config import DefaultConfig, TrainingConfig, SNerfBasicConfig, SNerfWBasicC
 import metrics
 import numpy as np
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 def extract_model_state_dict(ckpt_path, model_name='model', prefixes_to_ignore=[]):
     checkpoint = torch.load(ckpt_path, map_location=torch.device('cpu'))
@@ -123,7 +123,11 @@ def save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number):
     src_id = sample["src_id"][0]
 
     typ = "fine" if "rgb_fine" in results else "coarse"
-    W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
+    if "h" in sample and "w" in sample:
+        W, H = sample["w"][0], sample["h"][0]
+    else:
+        W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))  # assume squared images
+    print(results[f'rgb_{typ}'].shape, W, H)
     img = results[f'rgb_{typ}'].view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
     img_gt = rgbs.view(H, W, 3).permute(2, 0, 1).cpu()  # (3, H, W)
     depth = results[f"depth_{typ}"]

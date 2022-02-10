@@ -157,6 +157,10 @@ class NeRF(nn.Module):
                 torch.nn.Linear(feat // 2, 3),
                 torch.nn.Sigmoid(),
             )
+            if self.predict_uncertainty:
+                self.beta_from_xyz = torch.nn.Sequential(
+                    torch.nn.Linear(t_embedding_dims + feat, feat // 2), nl,
+                    torch.nn.Linear(feat // 2, 1), nn.Softplus())
 
         if self.variant == "s-nerf-w":
             self.ambient_encoding = torch.nn.Sequential(
@@ -227,6 +231,10 @@ class NeRF(nn.Module):
             sun_v = self.sun_v_net(input_sun_v_net)
             sky_color = self.sky_color(input_sun_dir)
             out = torch.cat([out, sun_v, sky_color], 1) # (B, 8)
+            if self.predict_uncertainty:
+                input_for_beta = torch.cat([xyz_features, input_t], -1)
+                beta = self.beta_from_xyz(input_for_beta)
+                out = torch.cat([out, beta], 1) # (B, 12)
 
         if self.variant == "s-nerf-w":
             # sat-nerf outputs

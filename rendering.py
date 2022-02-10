@@ -83,14 +83,14 @@ def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=Non
     out_chunks = []
     for i in range(0, batch_size, chunk):
         out_chunks += [model(xyz_[i:i+chunk],
-                             input_t=None if rays_t is None else rays_t_[i:i + chunk],
+                             input_t=None if rays_t_ is None else rays_t_[i:i + chunk],
                              input_dir=None if rays_d_ is None else rays_d_[i:i+chunk],
                              input_sun_dir=None if sun_d_ is None else sun_d_[i:i+chunk])]
     out = torch.cat(out_chunks, 0)
 
     # retreive outputs
     out_channels = model.outputs_per_variant[variant]
-    if variant == "s-nerf-w" and model.predict_uncertainty:
+    if variant in ["s-nerf-w", "s-nerf"] and model.predict_uncertainty:
         out_channels += 1
     out = out.view(N_rays, N_samples, out_channels)
     rgbs = out[..., :3]  # (N_rays, N_samples, 3)
@@ -98,6 +98,7 @@ def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=Non
     if variant == "s-nerf":
         sun_v = out[..., 4:5]  # (N_rays, N_samples, 1)
         sky_rgb = out[..., 5:8]  # (N_rays, N_samples, 3)
+        uncertainty = out[..., 8:9] if model.predict_uncertainty else None
     if variant == "s-nerf-w":
         sun_v = out[..., 4:5] # (N_rays, N_samples, 1)
         ambient_a = out[..., 5:8] # (N_rays, N_samples, 3)
@@ -135,6 +136,8 @@ def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=Non
                   'albedo': rgbs,
                   'sun': sun_v,
                   'sky': sky_rgb}
+        if model.predict_uncertainty:
+            result['beta'] = uncertainty
     elif variant == "s-nerf-w":
         depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
         rgb_final = torch.sum(weights.unsqueeze(-1) * (rgbs * sun_v * ambient_a + ambient_b), -2) # (N_rays, 3)
@@ -198,20 +201,20 @@ def render_rays(models,
 
     # run coarse model
     typ = "coarse"
+    rays_t_ = models['t'](ts) if ts is not None else None
     if variant == "s-nerf":
         sun_d = rays[:, 8:11]
         # render using main set of rays
-        result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d)
+        result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d, rays_t=rays_t_)
         if conf.lambda_s > 0:
             # predict transparency/sun visibility from a secondary set of solar correction rays
             xyz_coarse = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
-            result_ = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=sun_d, sun_d=sun_d)
+            result_ = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=sun_d, sun_d=sun_d, rays_t=rays_t_)
             result['weights_sc'] = result_["weights"]
             result['transparency_sc'] = result_["transparency"]
             result['sun_sc'] = result_["sun"]
     elif variant == "s-nerf-w":
         sun_d = rays[:, 8:11]
-        rays_t_ = models['t'](ts) if ts is not None else None
         result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d, rays_t=rays_t_)
         if conf.lambda_s > 0:
             # predict transparency/sun visibility from a secondary set of solar correction rays

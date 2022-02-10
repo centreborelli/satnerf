@@ -6,7 +6,7 @@ import pytorch_lightning as pl
 
 from opt import get_opts
 from config import load_config, save_config
-from datasets import load_dataset
+from datasets import load_dataset, satellite
 from metrics import load_loss, DepthLoss, SatNerfColorLoss, PatchesLoss
 from torch.utils.data import DataLoader
 from collections import defaultdict
@@ -21,7 +21,7 @@ import datetime
 
 from eval_aoi import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+#os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 class NeRF_pl(pl.LightningModule):
     """NeRF network"""
@@ -33,8 +33,6 @@ class NeRF_pl(pl.LightningModule):
         self.save_hyperparameters(dict(self.conf))
 
         self.loss = load_loss(args)
-        if "s-nerf" in self.conf.name:
-            self.loss.lambda_s = self.conf.lambda_s
         if self.args.patches:
             self.patches_loss = PatchesLoss()
         elif self.args.depth:
@@ -42,13 +40,14 @@ class NeRF_pl(pl.LightningModule):
             self.depthloss_drop = np.round(self.args.depthloss_drop * self.conf.training.max_steps)
         self.t_embbeding_size = self.conf.N_tau if "N_tau" in dict(self.conf).keys() else 0
         self.define_models()
-        if self.conf.name == "s-nerf-w" and self.models["coarse"].predict_uncertainty:
-            self.loss = SatNerfColorLoss(lambda_s=self.conf.lambda_s)
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0
 
-        if self.conf.name == "s-nerf-w":
+        if "s-nerf" in self.conf.name:
+            self.loss.lambda_s = self.conf.lambda_s
+        if self.conf.name in ["s-nerf-w", "s-nerf"] and self.args.uncertainty:
+            self.loss = SatNerfColorLoss(lambda_s=self.conf.lambda_s)
             self.embedding_t = torch.nn.Embedding(self.conf.N_vocab, self.conf.N_tau)
             self.models["t"] = self.embedding_t
 
@@ -306,7 +305,7 @@ def main():
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,
-                         gpus=[args.gpu_id],
+                         gpus=1, #[args.gpu_id]
                          auto_select_gpus=False,
                          deterministic=True,
                          benchmark=True,

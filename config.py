@@ -88,13 +88,14 @@ def load_config(args):
     config_dict = {"nerf": DefaultConfig, "s-nerf": SNerfBasicConfig, "s-nerf-w": SNerfWBasicConfig}
 
     conf = OmegaConf.structured(config_dict[args.config_name])
+    conf.training.max_steps = int(args.training_iters)
+    if args.init_lr is not None:
+        config.training.lr = float(args.init_lr)
+    if args.fc_units is not None:
+        conf.feat = int(args.fc_units)
 
     if "s-nerf" in args.config_name:
-        if args.img_downscale == 2:
-            conf.training.max_steps = 800000
         conf.lambda_s = args.solarloss_lambda
-        if args.fc_units is not None:
-            conf.feat = int(args.fc_units)
         #conf.training.lr = float(1e-4)
         #conf.training.bs = int(256)
 

@@ -92,7 +92,7 @@ def load_config(args):
     conf = OmegaConf.structured(config_dict[args.config_name])
     conf.training.max_steps = int(args.training_iters)
     if args.init_lr is not None:
-        config.training.lr = float(args.init_lr)
+        conf.training.lr = float(args.init_lr)
     if args.fc_units is not None:
         conf.feat = int(args.fc_units)
 

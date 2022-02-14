@@ -9,6 +9,55 @@ import shutil
 import datetime
 from osgeo import gdal
 
+
+def geojson_polygon(coords_array):
+    """
+    define a geojson polygon from a Nx2 numpy array with N 2d coordinates delimiting a boundary
+    """
+    from shapely.geometry import Polygon
+
+    # first attempt to construct the polygon, assuming the input coords_array are ordered
+    # the centroid is computed using shapely.geometry.Polygon.centroid
+    # taking the mean is easier but does not handle different densities of points in the edges
+    pp = coords_array.tolist()
+    poly = Polygon(pp)
+    x_c, y_c = np.array(poly.centroid.xy).ravel()
+
+    # check that the polygon is valid, i.e. that non of its segments intersect
+    # if the polygon is not valid, then coords_array was not ordered and we have to do it
+    # a possible fix is to sort points by polar angle using the centroid (anti-clockwise order)
+    if not poly.is_valid:
+        pp.sort(key=lambda p: np.arctan2(p[0] - x_c, p[1] - y_c))
+
+    # construct the geojson
+    geojson_polygon = {"coordinates": [pp], "type": "Polygon"}
+    geojson_polygon["center"] = [x_c, y_c]
+    return geojson_polygon
+
+def lonlat_from_utm(easts, norths, zonestring):
+    """
+    convert utm to lon-lat
+    """
+    import pyproj
+    proj_src = pyproj.Proj("+proj=utm +zone=%s" % zonestring)
+    proj_dst = pyproj.Proj("+proj=latlong")
+    return pyproj.transform(proj_src, proj_dst, easts, norths)
+
+def read_DFC2019_lonlat_aoi(aoi_id, dfc_dir):
+    if aoi_id[:3] == "JAX":
+        zonestring = "17R"
+    else:
+        raise ValueError("AOI not valid. Expected JAX_(3digits) but received {}".format(aoi_id))
+    roi = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/" + aoi_id + "_DSM.txt"))
+    xoff, yoff, xsize, ysize, resolution = roi[0], roi[1], int(roi[2]), int(roi[2]), roi[3]
+    ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
+    xmin, xmax, ymin, ymax = ulx, lrx, uly, lry
+    easts = [xmin, xmin, xmax, xmax, xmin]
+    norths = [ymin, ymax, ymax, ymin, ymin]
+    lons, lats = lonlat_from_utm(easts, norths, zonestring)
+    lonlat_bbx = geojson_polygon(np.vstack((lons, lats)).T)
+    return lonlat_bbx
+
 def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None, out_rdsm_path=None, out_err_path=None):
     """
     in_dsm_path is a string with the path to the NeRF generated dsm
@@ -122,7 +171,7 @@ def select_pairs(root_dir, n_pairs=1):
     return selected_pairs_json_paths, n_possible_pairs
 
 
-def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution):
+def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution, prefix="", aoi=None):
 
     # load json data from the selected pair
     data = []
@@ -134,8 +183,14 @@ def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution):
     config = {"images": [{"img": os.path.join(img_dir, data[0]["img"]), "rpc": data[0]["rpc"]},
                          {"img": os.path.join(img_dir, data[1]["img"]), "rpc": data[1]["rpc"]}],
               "out_dir": ".",
-              "roi": {"x": 0, "y": 0, "w": data[0]["width"], "h": data[0]["height"]},
-              "dsm_resolution": resolution}
+              "dsm_resolution": resolution,
+              "rectification_method": "sift",
+              "matching_algorithm": "mgm_multi"}
+    if aoi is None:
+        config["roi"] = {"x": 0, "y": 0, "w": data[0]["width"], "h": data[0]["height"]}
+    else:
+        config["roi_geojson"] = aoi
+
     # sanity check
     for i in [0, 1]:
         if not os.path.exists(config["images"][i]["img"]):
@@ -144,7 +199,7 @@ def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution):
     # write s2p config to disk
     img_id_l = os.path.splitext(os.path.basename(json_path_l))[0]
     img_id_r = os.path.splitext(os.path.basename(json_path_r))[0]
-    s2p_out_dir = os.path.join(out_dir, "{}_{}".format(img_id_l, img_id_r))
+    s2p_out_dir = os.path.join(out_dir, "{}{}_{}".format(prefix, img_id_l, img_id_r))
     os.makedirs(s2p_out_dir, exist_ok=True)
     config_path = os.path.join(s2p_out_dir, "config.json")
     with open(config_path, "w") as f:
@@ -152,13 +207,14 @@ def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution):
 
     # run s2p and redirect output to log file
     log_file = os.path.join(s2p_out_dir, 'log.txt')
-    with open(log_file, 'w') as outfile:
-        subprocess.run(['s2p', config_path], stdout=outfile, stderr=outfile)
+    if not os.path.exists(os.path.join(s2p_out_dir, 'dsm.tif')):
+        with open(log_file, 'w') as outfile:
+            subprocess.run(['s2p', config_path], stdout=outfile, stderr=outfile)
 
 def load_heuristic_pairs(root_dir, img_dir, heuristic_pairs_file, n_pairs=1):
 
     # link msi ids to rgb geotiff ids
-    img_paths = glob.glob(os.path.join(img_dir, "*.tif"))
+    img_paths = sorted(glob.glob(os.path.join(img_dir, "*.tif")))
     msi_id_to_rgb_id ={}
     for p in img_paths:
         rgb_id = os.path.splitext(os.path.basename(p))[0]
@@ -183,32 +239,40 @@ def load_heuristic_pairs(root_dir, img_dir, heuristic_pairs_file, n_pairs=1):
 
     return selected_pairs_json_paths
 
-def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n_pairs=1):
+def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n_pairs=1, crops=True):
+
+    if crops:
+        print("using crops")
+        img_dir = os.path.join(dfc_dir, "Track3-RGB-crops/{}".format(aoi_id))
+        output_dir += "_crops"
+    else:
+        img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
 
     out_dir = os.path.join(output_dir, aoi_id)
-    if os.path.exists(out_dir):
-        shutil.rmtree(out_dir)
-    img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
+    #if os.path.exists(out_dir):
+    #    shutil.rmtree(out_dir)
 
     heuristic = True
     heuristic_pairs_file = os.path.join(dfc_dir, "DFC2019_JAX_heuristic_pairs.txt")
     if heuristic and os.path.exists(heuristic_pairs_file):
-        selected_pairs_json_paths = load_heuristic_pairs(root_dir, img_dir, heuristic_pairs_file)
+        selected_pairs_json_paths = load_heuristic_pairs(root_dir, img_dir, heuristic_pairs_file, n_pairs=n_pairs)
         print("{} heuristic pairs selected".format(n_pairs))
     else:
         selected_pairs_json_paths, n_possible_pairs = select_pairs(root_dir, n_pairs=n_pairs)
         print("{} random pairs selected from {} possible".format(n_pairs, n_possible_pairs))
 
+    lonlat_aoi = read_DFC2019_lonlat_aoi(aoi_id, dfc_dir)
+
     for t, (json_path_l, json_path_r) in enumerate(selected_pairs_json_paths):
         print("Running s2p ! Pair {} of {}...".format(t+1, n_pairs))
-        run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution)
+        run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution, aoi=lonlat_aoi, prefix="{:02}_".format(t))
         print("...done")
     s2p_ply_paths = glob.glob(os.path.join(out_dir, "*/*/*/*/cloud.ply"))
     shutil.rmtree("s2p_tmp")
 
     # merge s2p pairwise dsms
     from plyflatten import plyflatten_from_plyfiles_list
-    raster, profile = plyflatten_from_plyfiles_list(s2p_ply_paths, resolution=resolution, radius=3)
+    raster, profile = plyflatten_from_plyfiles_list(s2p_ply_paths, resolution=resolution, radius=1)
     profile["dtype"] = raster.dtype
     profile["height"] = raster.shape[0]
     profile["width"] = raster.shape[1]
@@ -221,8 +285,12 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
     # evaluate s2p generated mvs DSM
     gt_dsm_path = os.path.join(dfc_dir, "Track3-Truth/{}_DSM.tif".format(aoi_id))
     gt_roi_metadata = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/{}_DSM.txt".format(aoi_id)))
-    gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
-    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path)
+    if aoi_id in ["JAX_004", "JAX_260"]:
+        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS_v2.tif".format(aoi_id))
+    else:
+        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
+    rmvs_dsm_path = os.path.join(out_dir, "rmvs_dsm_{}_pairs.tif".format(n_pairs))
+    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path)
     print("Path to output S2P MVS DSM: {}".format(mvs_dsm_path))
     print("Altitude MAE: {}".format(np.nanmean(abs_err)))
 

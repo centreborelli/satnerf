@@ -107,6 +107,8 @@ class SatNerfColorLoss(torch.nn.Module):
         beta_coarse = torch.sum(inputs['weights_coarse'].unsqueeze(-1) * inputs['beta_coarse'], -2) + self.beta_min
         d['c_l'] = ((inputs['rgb_coarse'] - targets) ** 2 / (2 * beta_coarse ** 2)).mean()
         d['c_b'] = (3 + torch.log(beta_coarse).mean())/2  # +3 to make c_b positive since beta_min = 0.05
+        #sun_visibility = torch.sum(inputs['weights_coarse'].unsqueeze(-1) * inputs['sun_coarse'], -2)
+        #d['c_s_reg'] = torch.mean(3 + torch.log(sun_visibility + 0.05) + torch.log(1 - sun_visibility + 0.05))
 
         if self.lambda_s > 0:
             sun_sc = inputs['sun_sc_coarse'].squeeze()

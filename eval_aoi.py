@@ -78,7 +78,7 @@ def load_nerf(run_id, log_path, checkpoints_dir, epoch_number, args):
     # load models
     models = {}
 
-    if conf.name == "s-nerf-w":
+    if conf.name in ["s-nerf-w", "s-nerf"] and args["uncertainty"]:
         embedding_t = torch.nn.Embedding(conf.N_vocab, conf.N_tau)
         load_ckpt(embedding_t, checkpoint_path, model_name='embedding_t')
         models["t"] = embedding_t.cuda('cuda:0').cuda()

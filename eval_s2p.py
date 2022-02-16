@@ -180,8 +180,20 @@ def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution, prefix="", a
             data.append(json.load(f))
 
     # create s2p config
-    config = {"images": [{"img": os.path.join(img_dir, data[0]["img"]), "rpc": data[0]["rpc"]},
-                         {"img": os.path.join(img_dir, data[1]["img"]), "rpc": data[1]["rpc"]}],
+    use_pan = True
+    if use_pan:
+        aoi_id = data[0]["img"][:7]
+        if aoi_id in ["JAX_004", "JAX_068"]:
+            pan_dir = "/vsicurl/http://138.231.80.166:2332/grss-2019/track_3/Track3-MSI-1/"
+        else:
+            pan_dir = "/vsicurl/http://138.231.80.166:2332/grss-2019/track_3/Track3-MSI-3/"
+        img_path1 = pan_dir + data[0]["img"].replace("RGB", "PAN")
+        img_path2 = pan_dir + data[1]["img"].replace("RGB", "PAN")
+    else:
+        img_path1 = os.path.join(img_dir, data[0]["img"])
+        img_path2 = os.path.join(img_dir, data[1]["img"])
+    config = {"images": [{"img": img_path1, "rpc": data[0]["rpc"]},
+                         {"img": img_path2, "rpc": data[1]["rpc"]}],
               "out_dir": ".",
               "dsm_resolution": resolution,
               "rectification_method": "sift",
@@ -192,9 +204,10 @@ def run_s2p(json_path_l, json_path_r, img_dir, out_dir, resolution, prefix="", a
         config["roi_geojson"] = aoi
 
     # sanity check
-    for i in [0, 1]:
-        if not os.path.exists(config["images"][i]["img"]):
-            raise FileNotFoundError("Could not find {}".format(config["images"][i]["img"]))
+    if not use_pan:
+        for i in [0, 1]:
+            if not os.path.exists(config["images"][i]["img"]):
+                raise FileNotFoundError("Could not find {}".format(config["images"][i]["img"]))
 
     # write s2p config to disk
     img_id_l = os.path.splitext(os.path.basename(json_path_l))[0]
@@ -293,6 +306,8 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
     abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path)
     print("Path to output S2P MVS DSM: {}".format(mvs_dsm_path))
     print("Altitude MAE: {}".format(np.nanmean(abs_err)))
+    shutil.copyfile(rmvs_dsm_path, rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(np.nanmean(abs_err))))
+    os.remove(rmvs_dsm_path)
 
 if __name__ == '__main__':
     import fire

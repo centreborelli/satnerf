@@ -180,6 +180,9 @@ class NeRF(nn.Module):
             if self.variant in ["s-nerf", "s-nerf-w"]:
                 self.sun_v_net.apply(sine_init)
                 self.sun_v_net[0].apply(first_layer_sine_init)
+                #if self.predict_uncertainty:
+                #    self.beta_from_xyz.apply(sine_init)
+                #    self.beta_from_xyz[0].apply(first_layer_sine_init)
 
 
     def forward(self, input_xyz, input_dir=None, input_sun_dir=None, input_t=None, sigma_only=False):

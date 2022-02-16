@@ -23,7 +23,7 @@ def get_opts():
                         help="Experiment name")
     parser.add_argument("--gpu_id", type=int, required=True,
                         help="GPU that will be used")
-    parser.add_argument('--save_every_n_epochs', type=int, default=10,
+    parser.add_argument('--save_every_n_epochs', type=int, default=5,
                         help="Save checkpoints and debug files every n epochs")
 
     # dataset options

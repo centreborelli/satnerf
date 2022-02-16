@@ -7,7 +7,7 @@ import pytorch_lightning as pl
 from opt import get_opts
 from config import load_config, save_config
 from datasets import load_dataset, satellite
-from metrics import load_loss, DepthLoss, SatNerfColorLoss, PatchesLoss
+from metrics import load_loss, DepthLoss, SatNerfColorLoss, PatchesLoss, SNerfLoss
 from torch.utils.data import DataLoader
 from collections import defaultdict
 
@@ -48,6 +48,7 @@ class NeRF_pl(pl.LightningModule):
             self.loss.lambda_s = self.conf.lambda_s
         if self.conf.name in ["s-nerf-w", "s-nerf"] and self.args.uncertainty:
             self.loss = SatNerfColorLoss(lambda_s=self.conf.lambda_s)
+            self.loss_without_beta = SNerfLoss(lambda_s=self.conf.lambda_s)
             self.embedding_t = torch.nn.Embedding(self.conf.N_vocab, self.conf.N_tau)
             self.models["t"] = self.embedding_t
 
@@ -166,7 +167,11 @@ class NeRF_pl(pl.LightningModule):
         results = self(rays, ts)
         if "mask" in batch["color"]:
             results["mask"] = batch["color"]["mask"]
-        loss, loss_dict = self.loss(results, rgbs)
+        if 'beta_coarse' in results and self.get_current_epoch(self.train_steps) < 1:
+            loss, loss_dict = self.loss_without_beta(results, rgbs)
+        else:
+            loss, loss_dict = self.loss(results, rgbs)
+        self.conf.training.noise_std *= 0.9
 
         if self.args.patches:
             # remove the batch dimension

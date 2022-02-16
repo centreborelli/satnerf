@@ -553,7 +553,7 @@ class SatelliteDataset(Dataset):
         import rasterio
 
         # run plyflatten
-        dsm = plyflatten(cloud, xoff, yoff, resolution, xsize, ysize, radius=3, sigma=float("inf"))
+        dsm = plyflatten(cloud, xoff, yoff, resolution, xsize, ysize, radius=1, sigma=float("inf"))
 
         n = utm.latlon_to_zone_number(lats[0], lons[0])
         l = utm.latitude_to_zone_letter(lats[0])

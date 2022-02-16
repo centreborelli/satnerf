@@ -109,9 +109,12 @@ def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_di
 
     # evaluate NeRF generated DSM
     tmp_path = glob.glob(os.path.join(out_dir, "dsm/*.tif"))[0]
+    tmp_path2 = glob.glob(os.path.join(out_dir, "gt_rgb/*.tif"))[0]
+    tmp_path3 = os.path.join(output_dir, "pretty_dsm", run_id, "ref_rgb.tif")
     pred_dsm_path = os.path.join(output_dir, "pretty_dsm", run_id, "dsm_epoch{}.tif".format(epoch_number))
     pred_rdsm_path = os.path.join(output_dir, "pretty_dsm", run_id, "rdsm_epoch{}.tif".format(epoch_number))
     shutil.copyfile(tmp_path, pred_dsm_path)
+    shutil.copyfile(tmp_path2, tmp_path3)
     shutil.rmtree(out_dir)
 
     gt_dsm_path = os.path.join(args["gt_dir"], "{}_DSM.tif".format(aoi_id))

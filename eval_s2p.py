@@ -252,6 +252,59 @@ def load_heuristic_pairs(root_dir, img_dir, heuristic_pairs_file, n_pairs=1):
 
     return selected_pairs_json_paths
 
+def project_cloud_into_utm_grid(xyz, bb, definition, mode, mask=None):
+    # possible modes = 'min', 'max', 'avg', 'med'
+    from itertools import groupby
+
+    origin = np.array([bb[0], bb[2]])
+    w, h = bb[1] - bb[0], bb[3] - bb[2]
+    map_w = int(round(w / definition)) + 1
+    map_h = int(round(h / definition)) + 1
+
+    map_np = np.zeros((map_h, map_w), dtype=float)
+    map_np[:,:] = np.nan
+    coords = np.round((xyz[:,:2] - origin) / definition).astype(int)
+    
+    # sanity check
+    valid_rows = np.logical_and(coords[:,1] < map_h, coords[:,1] >= 0)
+    valid_cols = np.logical_and(coords[:,0] < map_w, coords[:,0] >= 0)
+    valid_coords_indices = np.logical_and(valid_rows, valid_cols)
+    coords = coords[valid_coords_indices, :]
+    xyz = xyz[valid_coords_indices, :]
+    
+    if mask is None:
+        mask = np.zeros((map_h, map_w), dtype=int)
+
+    if mode == 'min' or mode == 'max':
+        if mode == 'min':
+            idx = np.flip(np.argsort(xyz[:,2]))
+        else:
+            idx = np.argsort(xyz[:,2])   
+        coords, data_np = coords[idx], xyz[idx]
+        map_np[coords[:,1], coords[:,0]] = data_np[:,2]
+    else:
+        coords_unique, coords_indices = np.unique(coords, return_inverse=True, axis=0)
+        sorted_id_z = sorted(list(zip(coords_indices, xyz[:,2])), key=lambda x: x[0])
+        groups_id_z = groupby(sorted_id_z, lambda x: x[0])
+        
+        dsm_z = []
+        if mode == 'avg':
+            #dsm_heights = [np.mean(cloud_heights[coords_indices == i]) for i in np.arange(coords_unique.shape[0])]
+            dsm_z = [np.mean(np.array(list(g))[:,1]) for k, g in groups_id_z]
+        else:
+            #dsm_z = [np.median(cloud_heights[coords_indices == i]) for i in np.arange(coords_unique.shape[0])] # (~180s/dsm)
+            dsm_z = [np.median(np.array(list(g))[:,1]) for k, g in groups_id_z] #(~10s/dsm)
+            
+        map_np[coords_unique[:,1], coords_unique[:,0]] = np.array(dsm_z)
+             
+    if (np.sum(np.logical_not(np.isnan(map_np))) < 3):
+        print ('There are less than 3 points.')
+    
+    raw_map_np = map_np.copy()
+    raw_map_np = np.flipud(raw_map_np)
+    
+    return raw_map_np
+
 def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n_pairs=1, crops=True):
 
     if crops:
@@ -283,18 +336,17 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
     s2p_ply_paths = glob.glob(os.path.join(out_dir, "*/*/*/*/cloud.ply"))
     shutil.rmtree("s2p_tmp")
 
-    # merge s2p pairwise dsms
+    # merge s2p pairwise dsms (mean)
     from plyflatten import plyflatten_from_plyfiles_list
-    raster, profile = plyflatten_from_plyfiles_list(s2p_ply_paths, resolution=resolution, radius=1)
+    raster, profile = plyflatten_from_plyfiles_list(s2p_ply_paths, resolution=resolution, radius=2)
     profile["dtype"] = raster.dtype
     profile["height"] = raster.shape[0]
     profile["width"] = raster.shape[1]
     profile["count"] = 1
     profile["driver"] = "GTiff"
-    mvs_dsm_path = os.path.join(out_dir, "mvs_dsm_{}_pairs.tif".format(n_pairs))
+    mvs_dsm_path = os.path.join(out_dir, "mvs_dsm_{}_pairs_avg.tif".format(n_pairs))
     with rasterio.open(mvs_dsm_path, "w", **profile) as f:
         f.write(raster[:, :, 0], 1)
-
     # evaluate s2p generated mvs DSM
     gt_dsm_path = os.path.join(dfc_dir, "Track3-Truth/{}_DSM.tif".format(aoi_id))
     gt_roi_metadata = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/{}_DSM.txt".format(aoi_id)))
@@ -302,12 +354,54 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
         gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS_v2.tif".format(aoi_id))
     else:
         gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
-    rmvs_dsm_path = os.path.join(out_dir, "rmvs_dsm_{}_pairs.tif".format(n_pairs))
+    rmvs_dsm_path = os.path.join(out_dir, "rmvs_avg_dsm_{}_pairs.tif".format(n_pairs))
     abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path)
     print("Path to output S2P MVS DSM: {}".format(mvs_dsm_path))
     print("Altitude MAE: {}".format(np.nanmean(abs_err)))
     shutil.copyfile(rmvs_dsm_path, rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(np.nanmean(abs_err))))
+    with rasterio.open(rmvs_dsm_path, "r") as f:
+        avg_dsm = f.read(1)
+        profile = f.profile
     os.remove(rmvs_dsm_path)
+
+    # merge s2p pairwise dsms (median)
+    from s2p import ply
+    xyz = np.vstack([ply.read_3d_point_cloud_from_ply(p)[0][:,:3] for p in s2p_ply_paths])
+    # read dsm metadata
+    dsm_metadata = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/{}_DSM.txt".format(aoi_id)))
+    xoff, yoff = dsm_metadata[0], dsm_metadata[1]
+    xsize, ysize = int(dsm_metadata[2]), int(dsm_metadata[2])
+    resolution_ = dsm_metadata[3]
+    # define projwin for gdal translate
+    ulx, uly, lrx, lry = xoff, yoff + ysize * resolution_, xoff + xsize * resolution_, yoff
+    bb = [ulx, lrx, lry, uly]
+    #bb = [np.min(xyz[:, 0]), np.max(xyz[:, 0]), np.min(xyz[:, 1]), np.max(xyz[:, 1])]
+    med_dsm = project_cloud_into_utm_grid(xyz, bb, resolution, 'med', mask=None)
+    profile["height"] = med_dsm.shape[0]
+    profile["width"] = med_dsm.shape[1]
+    mvs_dsm_path = os.path.join(out_dir, "mvs_dsm_{}_pairs_med.tif".format(n_pairs))
+    with rasterio.open(mvs_dsm_path, "w", **profile) as f:
+        f.write(med_dsm, 1)
+    # evaluate s2p generated mvs DSM
+    gt_dsm_path = os.path.join(dfc_dir, "Track3-Truth/{}_DSM.tif".format(aoi_id))
+    gt_roi_metadata = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/{}_DSM.txt".format(aoi_id)))
+    if aoi_id in ["JAX_004", "JAX_260"]:
+        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS_v2.tif".format(aoi_id))
+    else:
+        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
+    rmvs_dsm_path = os.path.join(out_dir, "rmvs_med_dsm_{}_pairs.tif".format(n_pairs))
+    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path)
+    print("Altitude MAE: {}".format(np.nanmean(abs_err)))
+    with rasterio.open(rmvs_dsm_path, "r") as f:
+        med_dsm = f.read(1)
+    med_nans = np.isnan(med_dsm)
+    med_dsm[med_nans] = avg_dsm[med_nans]
+    with rasterio.open(rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(np.nanmean(abs_err))), "w+", **profile) as f:
+        f.write(med_dsm, 1)
+    os.remove(rmvs_dsm_path)
+    
+    
+
 
 if __name__ == '__main__':
     import fire

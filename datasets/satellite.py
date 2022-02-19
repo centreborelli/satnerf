@@ -10,6 +10,7 @@ from torch.utils.data import Dataset
 from torchvision import transforms as T
 
 from PIL import Image
+import rasterio
 import rpcm
 import json
 import glob
@@ -382,24 +383,30 @@ class SatelliteDataset(Dataset):
         Returns:
             rgb: (h*w, 3) tensor of floats encoding h*w rgb colors
         """
-        img = Image.open(img_path).convert("RGB")
-        w, h = img.size
+        with rasterio.open(img_path, 'r') as f:
+            img = np.transpose(f.read(), (1, 2, 0)) / 255.
+        h, w = img.shape[:2]
         if self.img_downscale > 1:
             w = int(w // self.img_downscale)
             h = int(h // self.img_downscale)
-            img = img.resize((w, h), Image.LANCZOS)
+            img = np.transpose(img, (2, 0, 1))
+            img = T.Resize(size=(h, w), interpolation=Image.BICUBIC)(torch.Tensor(img))
+            img = np.transpose(img.numpy(), (1, 2, 0))
         img = self.img_to_tensor(img)  # (3, h, w)
         rgbs = img.view(3, -1).permute(1, 0)  # (h*w, 3)
         rgbs = rgbs.type(torch.FloatTensor)
         return rgbs
 
     def get_mask(self, mask_path):
-        img = Image.open(mask_path)
-        w, h = img.size
+        with rasterio.open(mask_path, 'r') as f:
+            img = np.transpose(f.read(), (1, 2, 0)) / 255.
+        h, w = img.shape[:2]
         if self.img_downscale > 1:
             w = int(w // self.img_downscale)
             h = int(h // self.img_downscale)
-            img = img.resize((w, h), Image.NEAREST)
+            img = np.transpose(img, (2, 0, 1))
+            img = T.Resize(size=(h, w), interpolation=Image.NEAREST)(torch.Tensor(img))
+            img = np.transpose(img.numpy(), (1, 2, 0))
         img = self.img_to_tensor(img)  # (1, h, w)
         mask = img.view(1, -1).permute(1, 0)  # (h*w, 1)
         mask = mask.type(torch.bool)

@@ -95,6 +95,13 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
         with rasterio.open(pred_dsm_path, 'w', **profile) as dst:
             pred_dsm[water_mask.astype(bool)] = np.nan
             dst.write(pred_dsm, 1)
+        tmp_gt_path = os.path.join(os.path.dirname(out_rdsm_path), "tmp_gt_{}.tif".format(unique_identifier))
+        with rasterio.open(gt_dsm_path, "r") as f:
+            gt_dsm = f.read()[0, :, :]
+        with rasterio.open(tmp_gt_path, 'w', **profile) as dst:
+            gt_dsm[water_mask.astype(bool)] = np.nan
+            dst.write(gt_dsm, 1)
+        gt_dsm_path = tmp_gt_path
 
     # read predicted and gt dsms
     with rasterio.open(gt_dsm_path, "r") as f:

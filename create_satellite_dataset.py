@@ -91,6 +91,8 @@ def create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_b
     if use_ba:
         from bundle_adjust import loader
         geotiff_paths = loader.load_list_of_paths(os.path.join(output_dir, "ba_files/ba_params/geotiff_paths.txt"))
+        geotiff_paths = [p.replace("/pan_crops/", "/crops/") for p in geotiff_paths]
+        geotiff_paths = [p.replace("PAN.tif", "RGB.tif") for p in geotiff_paths]
         ba_geotiff_basenames = [os.path.basename(x) for x in geotiff_paths]
         ba_kps_pts3d_ind = np.load(os.path.join(output_dir, "ba_files/ba_params/pts_ind.npy"))
         ba_kps_cam_ind = np.load(os.path.join(output_dir, "ba_files/ba_params/cam_ind.npy"))
@@ -185,10 +187,19 @@ def crop_geotiff_lonlat_aoi(geotiff_path, output_path, lonlat_aoi):
     rpc = rpcm.rpc_from_geotiff(geotiff_path)
     rpc.row_offset -= y
     rpc.col_offset -= x
-    profile["height"] = crop.shape[1]
-    profile["width"] = crop.shape[2]
+    not_pan = len(crop.shape) > 2
+    if not_pan:
+        profile["height"] = crop.shape[1]
+        profile["width"] = crop.shape[2]
+    else:
+        profile["height"] = crop.shape[0]
+        profile["width"] = crop.shape[1]
+        profile["count"] = 1
     with rasterio.open(output_path, 'w', **profile) as dst:
-        dst.write(crop)
+        if not_pan:
+            dst.write(crop)
+        else:
+            dst.write(crop, 1)
         dst.update_tags(**tags)
         dst.update_tags(ns='RPC', **rpc.to_geotiff_dict())
 
@@ -202,8 +213,20 @@ def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, crop_aoi=True
         os.makedirs(crops_dir, exist_ok=True)
         img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
         myimages = sorted(glob.glob(img_dir + "/*.tif"))
+        pan = True
+        if aoi_id in ["JAX_004", "JAX_068"]:
+            pan_dir = "/vsicurl/http://138.231.80.166:2332/grss-2019/track_3/Track3-MSI-1/"
+        else:
+            pan_dir = "/vsicurl/http://138.231.80.166:2332/grss-2019/track_3/Track3-MSI-3/"
         for geotiff_path in myimages:
-            crop_geotiff_lonlat_aoi(geotiff_path, os.path.join(crops_dir, os.path.basename(geotiff_path)), aoi_lonlat)
+            out_crop_path = os.path.join(crops_dir, os.path.basename(geotiff_path))
+            crop_geotiff_lonlat_aoi(geotiff_path, out_crop_path, aoi_lonlat)
+            if pan:
+                pan_crops_dir = os.path.join(output_dir, "pan_crops")
+                os.makedirs(pan_crops_dir, exist_ok=True)
+                out_crop_path = os.path.join(pan_crops_dir, os.path.basename(geotiff_path))
+                geotiff_path = os.path.join(pan_dir, os.path.basename(geotiff_path).replace("RGB.tif", "PAN.tif"))
+                crop_geotiff_lonlat_aoi(geotiff_path, out_crop_path, aoi_lonlat)
         img_dir = crops_dir
     else:
         img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))

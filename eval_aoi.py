@@ -259,6 +259,10 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=
     with open('{}/opts.json'.format(log_path), 'r') as f:
             args = json.load(f)
 
+    args["root_dir"] = "/mnt/cdisk/roger/Datasets" + args["root_dir"].split("Datasets")[-1]
+    args["img_dir"] = "/mnt/cdisk/roger/Datasets" + args["img_dir"].split("Datasets")[-1]
+    args["cache_dir"] = "/mnt/cdisk/roger/Datasets" + args["cache_dir"].split("Datasets")[-1]
+    args["gt_dir"] = "/mnt/cdisk/roger/Datasets" + args["gt_dir"].split("Datasets")[-1]
     # load nerf
     if checkpoints_dir is None:
         checkpoints_dir = args["checkpoints_dir"]
@@ -272,7 +276,7 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=
         train_jsons = f.read().split("\n")
         n_train = len(train_jsons)
 
-    if conf.name == "s-nerf-w":
+    if conf.name == "s-nerf-w" or (conf.name == "s-nerf" and args["uncertainty"]):
         train_indices = torch.arange(n_train)
         if split == "val":
             val_t_indices = find_best_embeddings_for_val_dataset(dataset, models, conf, train_indices)
@@ -303,6 +307,10 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
         src_id = sample["src_id"]
+        if "h" in sample and "w" in sample:
+            W, H = sample["w"], sample["h"]
+        else:
+            W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
 
         if val_t_indices[i] is None:
             ts = None
@@ -324,7 +332,6 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=
         typ = "fine" if "rgb_fine" in results else "coarse"
         psnr_ = metrics.psnr(results[f"rgb_{typ}"].cpu(), rgbs.cpu())
         psnr.append(psnr_)
-        W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
         ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W).cpu(), rgbs.view(1, 3, H, W).cpu())
         ssim.append(ssim_)
 

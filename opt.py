@@ -23,7 +23,7 @@ def get_opts():
                         help="Experiment name")
     parser.add_argument("--gpu_id", type=int, required=True,
                         help="GPU that will be used")
-    parser.add_argument('--save_every_n_epochs', type=int, default=5,
+    parser.add_argument('--save_every_n_epochs', type=int, default=4,
                         help="Save checkpoints and debug files every n epochs")
 
     # dataset options
@@ -40,7 +40,7 @@ def get_opts():
                         help='Downscale factor for the input images')
     parser.add_argument('--depth_supervision', dest='depth', action='store_true',
                         help='Use a set of known 3d points to supervise the geometry learning')
-    parser.add_argument('--depthloss_drop', type=float, default=0.2,
+    parser.add_argument('--depthloss_drop', type=float, default=0.25,
                         help='Portion of training steps at which the depth supervision loss should be dropped')
     parser.add_argument('--depthloss_without_weights', action='store_true',
                         help='Do not use reprojection errors to weight depth supervision loss')

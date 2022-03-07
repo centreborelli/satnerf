@@ -21,7 +21,7 @@ import datetime
 
 from eval_aoi import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
 
-#os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
 class NeRF_pl(pl.LightningModule):
     """NeRF network"""
@@ -167,7 +167,7 @@ class NeRF_pl(pl.LightningModule):
         results = self(rays, ts)
         if "mask" in batch["color"]:
             results["mask"] = batch["color"]["mask"]
-        if 'beta_coarse' in results and self.get_current_epoch(self.train_steps) < 1:
+        if 'beta_coarse' in results and self.get_current_epoch(self.train_steps) < 2:
             loss, loss_dict = self.loss_without_beta(results, rgbs)
         else:
             loss, loss_dict = self.loss(results, rgbs)
@@ -310,7 +310,7 @@ def main():
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,
-                         gpus=1, #[args.gpu_id]
+                         gpus=[args.gpu_id],
                          auto_select_gpus=False,
                          deterministic=True,
                          benchmark=True,

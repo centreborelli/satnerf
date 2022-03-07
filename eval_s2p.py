@@ -106,6 +106,7 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
     # read predicted and gt dsms
     with rasterio.open(gt_dsm_path, "r") as f:
         gt_dsm = f.read()[0, :, :]
+        kwds = f.profile
     with rasterio.open(pred_dsm_path, "r") as f:
         profile = f.profile
         pred_dsm = f.read()[0, :, :]
@@ -127,7 +128,7 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
         dsmr.apply_shift(pred_dsm_path, pred_rdsm_path, *transform)
         with rasterio.open(pred_rdsm_path, "r") as f:
             pred_rdsm = f.read()[0, :, :]
-    abs_err = abs(pred_rdsm - gt_dsm)
+    abs_err = pred_rdsm - gt_dsm
 
     # remove tmp files and write output tifs if desired
     os.remove(pred_dsm_path)
@@ -144,7 +145,7 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
         with rasterio.open(out_err_path, 'w', **profile) as dst:
             dst.write(abs_err, 1)
 
-    return abs_err
+    return abs(abs_err)
 
 #######################################################################################
 #######################################################################################
@@ -397,7 +398,8 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
     else:
         gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
     rmvs_dsm_path = os.path.join(out_dir, "rmvs_med_dsm_{}_pairs.tif".format(n_pairs))
-    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path)
+    rmvs_err_path = os.path.join(out_dir, "rmvs_med_err_{}_pairs.tif".format(n_pairs))
+    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path, out_err_path=rmvs_err_path)
     print("Altitude MAE: {}".format(np.nanmean(abs_err)))
     with rasterio.open(rmvs_dsm_path, "r") as f:
         med_dsm = f.read(1)

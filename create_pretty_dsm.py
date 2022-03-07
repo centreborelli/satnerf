@@ -93,6 +93,7 @@ def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_di
     sample = dataset[0]
     rays = sample["rays"]
     aoi_id = sample["src_id"][:7]
+    print(f"using image {sample['src_id']}...")
     sun_dirs = torch.from_numpy(np.tile(sun_d, (rays.shape[0], 1)))
     rays[:, 8:11] = sun_dirs.type(torch.FloatTensor)
     results = batched_inference(models, rays.cuda(), ts, conf)
@@ -124,7 +125,8 @@ def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_di
     else:
         gt_seg_path = os.path.join(args["gt_dir"], "{}_CLS.tif".format(aoi_id))
     from eval_s2p import dsm_pointwise_abs_errors
-    abs_err = dsm_pointwise_abs_errors(pred_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=pred_rdsm_path)
+    err_path = os.path.join(output_dir, "pretty_dsm", run_id, "rdsm_err_epoch{}.tif".format(epoch_number))
+    abs_err = dsm_pointwise_abs_errors(pred_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=pred_rdsm_path, out_err_path=err_path)
     print("Path to output NeRF DSM: {}".format(pred_dsm_path))
     print("Altitude MAE: {}".format(np.nanmean(abs_err)))
     shutil.copyfile(pred_rdsm_path, pred_rdsm_path.replace(".tif", "_{:.3f}.tif".format(np.nanmean(abs_err))))

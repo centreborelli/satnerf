@@ -46,7 +46,7 @@ Usage: python3 eval_aoi.py run_id logs_dir output_dir epoch_number [checkpoints_
 
 Example:
 ```
-python3 eval_aoi.py JAX_068 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results 5
+python3 eval_aoi.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results 5
 ```
 ---
 

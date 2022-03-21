@@ -1,42 +1,30 @@
-# Sat-Nerf
+# SatNeRF
 
 Developed by the [Centre Borelli](https://www.centreborelli.fr/), ENS Paris-Saclay (2021).
 
 ---
 
 ## 1. Installation
-1. Create a conda environment. GDAL is needed to handle DSM rasters efficiently.
+1. Create the required conda environments:
 ```
-conda create -n sat-nerf -c conda-forge python=3.6 libgdal
+conda init && bash -i create_conda_env.sh
 ```
-2. Activate the conda environment:
-```
-conda activate sat-nerf
-```
-3. Install the required Python packages. If you get an error similar to `Cannot uninstall X. It is a distutils installed project`, try adding the flag `--ignore-installed`.
-```
- pip install -r requirements.txt
-```
-4. Install Pytorch as explained [here](https://github.com/pytorch/pytorch/issues/49161). The code was developed to run on a TITAN V or a RTX 3090.
-```
-pip install torch==1.7.1+cu110 torchvision==0.8.2+cu110 torchaudio===0.7.2 -f https://download.pytorch.org/whl/torch_stable.html
-```
-5. It is recommended to install `dsmr`. Otherwise the code will not crash but DSM registration will lose accuracy and affect the estimated altitude MAE.
+This will create a `satnerf` env and a `s2p` env.
+2. It is recommended to install `dsmr`. Otherwise the code will not crash but DSM registration will lose accuracy and affect the estimated altitude MAE.
 
-Extra 1: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code. Example:
+Warning: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code. E.g:
 ```
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/mnt/cdisk/roger/miniconda3/envs/sat-nerf/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/envs/satnerf/lib
 ```
-Extra 2: To deactivate the conda environment use `conda deactivate`.  To remove the conda environment:
-`conda env remove -n sat-nerf`.
+where `$CONDA_PREFIX` is the path to your conda or miniconda directory.
 
 ---
 
 ## 2. Training:
 
 Example:
-```
-python3 main.py --exp_name depthx2_newpoints --root_dir /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068_ba_depth --img_dir /mnt/cdisk/roger/Datasets/DFC2019/Track3-RGB/JAX_068 --config_name s-nerf --cache_dir /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068_ba_depth/cache_512 --img_downscale 4 --checkpoints_dir /mnt/cdisk/roger/nerf_output/checkpoints --logs_dir /mnt/cdisk/roger/nerf_output/logs --gt_dir /mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth --depth_supervision
+```shell
+(satnerf) $ python3 train.py --model sat-nerf --exp_name exp_4 --root_dir /mnt/cdisk/roger/Datasets/SatNeRF/root_dir/crops_rpcs_ba_v2/JAX_068 --img_dir /mnt/cdisk/roger/Datasets/DFC2019/Track3-RGB-crops/JAX_068 --cache_dir /mnt/cdisk/roger/Datasets/SatNeRF/cache_dir/crops_rpcs_ba_v2/JAX_068_ds1 --gt_dir /mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth
 ```
 ---
 
@@ -46,7 +34,7 @@ Usage: python3 eval_aoi.py run_id logs_dir output_dir epoch_number [checkpoints_
 
 Example:
 ```
-python3 eval_aoi.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results 5
+python3 test.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results 5
 ```
 ---
 
@@ -55,16 +43,16 @@ python3 eval_aoi.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_
 
 ### 4.1. Dataset creation from the DFC2019 data:
 
-The `create_satellite_dataset.py` script can be used to generate input datasets for Sat-NeRF from the open-source [DFC2019 data](https://ieee-dataport.org/open-access/data-fusion-contest-2019-dfc2019). The `Track3-RGB` and `Track3-Truth` folders are needed.
+The `create_satellite_dataset.py` script can be used to generate input datasets for SatNeRF from the open-source [DFC2019 data](https://ieee-dataport.org/open-access/data-fusion-contest-2019-dfc2019). The `Track3-RGB` and `Track3-Truth` folders are needed.
 
 We encourage you to use the `bundle_adjust` package, available [here](https://github.com/centreborelli/sat-bundleadjust), to ensure your dataset employs highly accurate RPC camera models. This will also allow aggregating depth supervision to the training and consequently boost the performance of the NeRF model. Example:
-```
-python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068_ba
+```shell
+(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068_ba
 ```
 
 Alternatively, if you prefer not installing `bundle_adjust`, it is also possible to use the flag `--noba` to create the dataset using the original RPC camera models from the DFC2019 data. Example:
-```
-python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 --noba
+```shell
+(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 --noba
 ```
 
 ### 4.2. Depth supervision:
@@ -80,8 +68,8 @@ The script `check_depth_supervision_points.py` can additionally be used as a san
 Usage: python3 eval_aoi.py run_id logs_dir output_dir
 
 Example:
-```
-python3 check_depth_supervision_points.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results
+```shell
+(satnerf) $ python3 check_depth_supervision_points.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results
 ```
 
 
@@ -90,16 +78,28 @@ python3 check_depth_supervision_points.py 2021-11-03_08-00-59_depthx2_newpoints 
 The `plot_depth_mae.py` script may be useful to visualize how the altitude mean absolute error evolved during the training of one or multiple experiments.
 
 Example:
-```
-python3 plot_depth_mae.py run_ids.txt /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results /mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth/JAX_068_DSM.tif 50 mae_evolution.png
-```
-
-
-### 4.4. Compare to s2p
-
-Example:
-```
-python3 eval_s2p.py JAX_068 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 /mnt/cdisk/roger/Datasets/DFC2019
+```shell
+(satnerf) $ python3 plot_depth_mae.py run_ids.txt /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results /mnt/cdisk/roger/Datasets/DFC2019/Track3-Truth/JAX_068_DSM.tif 50 mae_evolution.png
 ```
 
----
+
+### 4.4. Comparison to classic satellite MVS
+We compare the DSMs learned by SatNeRF with the equivalent DSMs obtained from manually selected multiple stereo pairs, reconstructed using the [S2P](https://github.com/centreborelli/s2p) pipeline.
+More details of the classic satellite MVS reconstruction process can be found [here](https://openaccess.thecvf.com/content_cvpr_2017_workshops/w18/html/Facciolo_Automatic_3D_Reconstruction_CVPR_2017_paper.html).
+
+To evaluate S2P please use the following command:
+```shell
+(s2p) $ python3 eval_s2p.py JAX_068 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 /mnt/cdisk/roger/Datasets/DFC2019
+```
+
+### Citations
+
+If you find this code or work helpful, please cite:
+```
+@article{mari2022satnerf,
+  title={{Sat-NeRF}: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using {RPC} Cameras},
+  author={Mar{\'\i}, Roger and Facciolo, Gabriele and Ehret, Thibaud},
+  journal={arXiv preprint arXiv:2203.08896},
+  year={2022}
+}
+```

@@ -9,7 +9,7 @@ Pillow
 plyflatten
 pyproj
 pytorch_lightning==1.3.7
-PyYAML
+PyYAML<=5.4.1
 rasterio
 rpcm
 scipy
@@ -17,3 +17,4 @@ srtm4
 utm
 chardet
 opencv-contrib-python
+jupyter

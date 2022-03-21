@@ -2,14 +2,15 @@ import torch
 import yaml
 import os
 import json
-import utils
+import train_utils
 from models import NeRF
 from datasets import SatelliteDataset
 from rendering import render_rays
 from collections import defaultdict
-from config import DefaultConfig, TrainingConfig, SNerfBasicConfig, SNerfWBasicConfig
 import metrics
 import numpy as np
+import sat_utils
+import train_utils
 
 #os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
@@ -119,8 +120,8 @@ def save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number):
 
     rays = sample["rays"].squeeze()
     rgbs = sample["rgbs"].squeeze()
-    src_path = sample["src_path"][0]
     src_id = sample["src_id"][0]
+    src_path = os.path.join(dataset.img_dir, src_id + ".tif")
 
     typ = "fine" if "rgb_fine" in results else "coarse"
     if "h" in sample and "w" in sample:
@@ -134,39 +135,39 @@ def save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number):
     # save depth prediction
     _, _, alts = dataset.get_latlonalt_from_nerf_prediction(rays.cpu(), depth.cpu())
     out_path = "{}/depth/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-    utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
+    train_utils.save_output_image(alts.reshape(1, H, W), out_path, src_path)
     # save dsm
     out_path = "{}/dsm/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
     dsm = dataset.get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
     # save rgb image
     out_path = "{}/rgb/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-    utils.save_output_image(img, out_path, src_path)
+    train_utils.save_output_image(img, out_path, src_path)
     # save gt rgb image
     out_path = "{}/gt_rgb/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-    utils.save_output_image(img_gt, out_path, src_path)
+    train_utils.save_output_image(img_gt, out_path, src_path)
     # save shadow modelling images
     if f"sun_{typ}" in results:
         s_v = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'sun_{typ}'], -2)
         out_path = "{}/sun/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-        utils.save_output_image(s_v.view(1, H, W).cpu(), out_path, src_path)
+        train_utils.save_output_image(s_v.view(1, H, W).cpu(), out_path, src_path)
         rgb_albedo = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'albedo_{typ}'], -2)
         out_path = "{}/albedo/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-        utils.save_output_image(rgb_albedo.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
+        train_utils.save_output_image(rgb_albedo.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
         if f"ambient_a_{typ}" in results:
             a_rgb = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'ambient_a_{typ}'], -2)
             out_path = "{}/ambient_a/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-            utils.save_output_image(a_rgb.view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
+            train_utils.save_output_image(a_rgb.view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
             b_rgb = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'ambient_b_{typ}'], -2)
             out_path = "{}/ambient_b/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-            utils.save_output_image(b_rgb.view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
+            train_utils.save_output_image(b_rgb.view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
         if f"beta_{typ}" in results:
             beta = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'beta_{typ}'], -2)
             out_path = "{}/beta/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-            utils.save_output_image(beta.view(1, H, W).cpu(), out_path, src_path)
+            train_utils.save_output_image(beta.view(1, H, W).cpu(), out_path, src_path)
         if f"sky_{typ}" in results:
             sky_rgb = torch.sum(results[f"weights_{typ}"].unsqueeze(-1) * results[f'sky_{typ}'], -2)
             out_path = "{}/sky/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-            utils.save_output_image(sky_rgb.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
+            train_utils.save_output_image(sky_rgb.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
 
 def compute_mae_and_save_dsm_errs(pred_dsm_path, roi_path, gt_dsm_path, out_dir, src_id, epoch_number):
     # save dsm errs
@@ -234,11 +235,6 @@ def predefined_val_ts(img_id):
              "JAX_214_006_RGB": 8,
              "JAX_214_001_RGB": 18,
              "JAX_214_008_RGB": 2}
-    elif aoi_id == "JAX_156":
-        d = {"JAX_156_009_RGB": 0,
-             "JAX_156_003_RGB": 8,
-             "JAX_156_004_RGB": 14,
-             "JAX_156_014_RGB": 18}
     elif aoi_id == "JAX_260":
         d = {"JAX_260_015_RGB": 0,
              "JAX_260_006_RGB": 3,

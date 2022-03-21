@@ -11,6 +11,9 @@ import torch
 
 from torch.optim.lr_scheduler import CosineAnnealingLR, ExponentialLR, MultiStepLR, StepLR
 
+def get_epoch_number_from_train_step(train_step, dataset_len, batch_size):
+    return int(train_step // (dataset_len // batch_size))
+
 def get_learning_rate(optimizer):
     """
     Get learning rate

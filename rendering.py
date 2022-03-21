@@ -49,136 +49,17 @@ def sample_pdf(bins, weights, N_importance, det=False, eps=1e-5):
     return samples
 
 
-def inference(model, conf, rays_xyz, z_vals, rays_d=None, sun_d=None, rays_t=None):
-    """
-    Runs the nerf model using a batch of input rays
-    Args:
-        model: NeRF model (coarse or fine)
-        conf: the NeRF configuration
-        rays_xyz: (N_rays, N_samples_, 3) sampled positions in the object space
-                  N_samples is the number of sampled points in each ray;
-                            = conf.n_samples for coarse model
-                            = conf.n_samples+conf.n_importance for fine model
-        z_vals: (N_rays, N_samples_) depths of the sampled positions
-        rays_d: (N_rays, 3) direction vectors of the rays
-        sun_d: (N_rays, 3) sun direction vectors
-    Returns:
-        result: dictionary with the output magnitudes of interest
-    """
-    N_rays = rays_xyz.shape[0]
-    N_samples = rays_xyz.shape[1]
-    xyz_ = rays_xyz.view(-1, 3)  # (N_rays*N_samples, 3)
-
-    # check if there are additional inputs, which are used or not depending on the nerf variant
-    rays_d_ = None if rays_d is None else torch.repeat_interleave(rays_d, repeats=N_samples, dim=0)
-    sun_d_ = None if sun_d is None else torch.repeat_interleave(sun_d, repeats=N_samples, dim=0)
-    rays_t_ = None if rays_t is None else torch.repeat_interleave(rays_t, repeats=N_samples, dim=0)
-
-    # the input batch is split in chunks to avoid possible problems with memory usage
-    chunk = conf.training.chunk
-    variant = conf.name
-    batch_size = xyz_.shape[0]
-
-    # run model
-    out_chunks = []
-    for i in range(0, batch_size, chunk):
-        out_chunks += [model(xyz_[i:i+chunk],
-                             input_t=None if rays_t_ is None else rays_t_[i:i + chunk],
-                             input_dir=None if rays_d_ is None else rays_d_[i:i+chunk],
-                             input_sun_dir=None if sun_d_ is None else sun_d_[i:i+chunk])]
-    out = torch.cat(out_chunks, 0)
-
-    # retreive outputs
-    out_channels = model.outputs_per_variant[variant]
-    if variant in ["s-nerf-w", "s-nerf"] and model.predict_uncertainty:
-        out_channels += 1
-    out = out.view(N_rays, N_samples, out_channels)
-    rgbs = out[..., :3]  # (N_rays, N_samples, 3)
-    sigmas = out[..., 3]  # (N_rays, N_samples)
-    if variant == "s-nerf":
-        sun_v = out[..., 4:5]  # (N_rays, N_samples, 1)
-        sky_rgb = out[..., 5:8]  # (N_rays, N_samples, 3)
-        uncertainty = out[..., 8:9] if model.predict_uncertainty else None
-    if variant == "s-nerf-w":
-        sun_v = out[..., 4:5] # (N_rays, N_samples, 1)
-        ambient_a = out[..., 5:8] # (N_rays, N_samples, 3)
-        ambient_b = out[..., 8:11] # (N_rays, N_samples, 3)
-        uncertainty = out[..., 11:12] if model.predict_uncertainty else None
-
-
-    # define deltas, i.e. the length between the points in which the ray is discretized
-    deltas = z_vals[:, 1:] - z_vals[:, :-1]  # (N_rays, N_samples-1)
-    delta_inf = 1e10 * torch.ones_like(deltas[:, :1])  # (N_rays, 1) the last delta is infinity
-    deltas = torch.cat([deltas, delta_inf], -1)  # (N_rays, N_samples)
-
-    # compute alpha as in the formula (3) of the nerf paper
-    noise_std = conf.training.noise_std
-    noise = torch.randn(sigmas.shape, device=sigmas.device) * noise_std
-    alphas = 1 - torch.exp(-deltas * torch.relu(sigmas + noise))  # (N_rays, N_samples)
-    alphas_shifted = \
-        torch.cat([torch.ones_like(alphas[:, :1]), 1 - alphas + 1e-10], -1)  # [1, a1, a2, ...]
-    transparency = torch.cumprod(alphas_shifted, -1)[:, :-1]  # T in the paper
-    weights = alphas * transparency # (N_rays, N_samples)
-    weights_sum = weights.sum(1)  # (N_rays), the accumulated opacity along the rays
-    # equals "1 - (1-a1)(1-a2)...(1-an)" mathematically
-
-    # return outputs
-    if variant == "s-nerf":
-        depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
-        # equation 2 of the s-nerf paper
-        irradiance = sun_v + (1 - sun_v) * sky_rgb
-        rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs * irradiance, -2)  # (N_rays, 3)
-        rgb_final = torch.clamp(rgb_final, min=0., max=1.)
-        result = {'rgb': rgb_final,
-                  'depth': depth_final,
-                  'weights': weights,
-                  'transparency': transparency,
-                  'albedo': rgbs,
-                  'sun': sun_v,
-                  'sky': sky_rgb}
-        if model.predict_uncertainty:
-            result['beta'] = uncertainty
-    elif variant == "s-nerf-w":
-        depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
-        rgb_final = torch.sum(weights.unsqueeze(-1) * (rgbs * sun_v * ambient_a + ambient_b), -2) # (N_rays, 3)
-        rgb_final = torch.clamp(rgb_final, min=0., max=1.)
-        result = {'rgb': rgb_final,
-                  'depth': depth_final,
-                  'weights': weights,
-                  'transparency': transparency,
-                  'albedo': rgbs,
-                  'sun': sun_v,
-                  'ambient_a': ambient_a,
-                  'ambient_b': ambient_b}
-        if model.predict_uncertainty:
-            result['beta'] = uncertainty
-    else:
-        # classic NeRF outputs
-        depth_final = torch.sum(weights * z_vals, -1)  # (N_rays)
-        rgb_final = torch.sum(weights.unsqueeze(-1) * rgbs, -2)  # (N_rays, 3)
-        result = {'rgb': rgb_final,
-                  'depth': depth_final,
-                  'weights': weights,
-                  'transparency': transparency}
-    return result
-
-
-def render_rays(models,
-                conf,
-                rays,
-                ts):
+def render_rays(models, args, rays, ts):
 
     # get config values
-    N_samples = conf.n_samples
-    N_importance = conf.n_importance
-    use_disp = conf.training.use_disp
-    perturb = conf.training.perturb
-    variant = conf.name
+    N_samples = args.n_samples
+    N_importance = args.n_importance
+    variant = args.model
+    use_disp = False
+    perturb = False
 
     # get rays
     rays_o, rays_d, near, far = rays[:, 0:3],  rays[:, 3:6], rays[:, 6:7], rays[:, 7:8]
-    # keep rays direction only if it is part of the inputs of the model
-    rays_d_ = rays_d if conf.input_sizes[1] > 0 else None
 
     # sample depths for coarse model
     z_steps = torch.linspace(0, 1, N_samples, device=rays.device)
@@ -201,33 +82,37 @@ def render_rays(models,
 
     # run coarse model
     typ = "coarse"
-    rays_t_ = models['t'](ts) if ts is not None else None
     if variant == "s-nerf":
+        from models.snerf import inference
         sun_d = rays[:, 8:11]
         # render using main set of rays
-        result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d, rays_t=rays_t_)
-        if conf.lambda_s > 0:
-            # predict transparency/sun visibility from a secondary set of solar correction rays
+        result = inference(models[typ], args, xyz_coarse, z_vals, rays_d=None, sun_d=sun_d)
+        if args.sc_lambda > 0:
+            # solar correction
             xyz_coarse = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
-            result_ = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=sun_d, sun_d=sun_d, rays_t=rays_t_)
+            result_ = inference(models[typ], args, xyz_coarse, z_vals, rays_d=None, sun_d=sun_d)
             result['weights_sc'] = result_["weights"]
             result['transparency_sc'] = result_["transparency"]
             result['sun_sc'] = result_["sun"]
-    elif variant == "s-nerf-w":
+    elif variant == "sat-nerf":
+        from models.satnerf import inference
         sun_d = rays[:, 8:11]
-        result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_, sun_d=sun_d, rays_t=rays_t_)
-        if conf.lambda_s > 0:
-            # predict transparency/sun visibility from a secondary set of solar correction rays
+        rays_t = models['t'](ts) if ts is not None else None
+        result = inference(models[typ], args, xyz_coarse, z_vals, rays_d=None, sun_d=sun_d, rays_t=rays_t)
+        if args.sc_lambda > 0:
+            # solar correction
             xyz_coarse = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
-            result_tmp = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=sun_d, sun_d=sun_d, rays_t=rays_t_)
+            result_tmp = inference(models[typ], args, xyz_coarse, z_vals, rays_d=None, sun_d=sun_d, rays_t=rays_t)
             result['weights_sc'] = result_tmp["weights"]
             result['transparency_sc'] = result_tmp["transparency"]
             result['sun_sc'] = result_tmp["sun"]
     else:
-        result = inference(models[typ], conf, xyz_coarse, z_vals, rays_d=rays_d_)
+        # classic nerf
+        from models.nerf import inference
+        result = inference(models[typ], args, xyz_coarse, z_vals, rays_d=rays_d)
     result_ = {}
     for k in result.keys():
-        result_["{}_{}".format(k, typ)] = result[k]
+        result_[f"{k}_{typ}"] = result[k]
 
     # run fine model
     if N_importance > 0:
@@ -246,20 +131,27 @@ def render_rays(models,
         if variant == "s-nerf":
             sun_d = rays[:, 8:11]
             # render using main set of rays
-            result = inference(models[typ], conf, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d)
-            if conf.lambda_s > 0:
-                # predict transparency/sun visibility from a secondary set of solar correction rays
+            result = inference(models[typ], args, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d)
+            if args.sc_lambda > 0:
+                # solar correction
                 xyz_fine = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
-                result_tmp = inference(models[typ], conf, xyz_fine, z_vals, rays_d=sun_d_, sun_d=sun_d)
-                result[f'weights_sc_{typ}'] = result_tmp["weights"]
-                result[f'transparency_sc_{typ}'] = result_tmp["transparency"]
-                result[f'sun_sc_{typ}'] = result_tmp["sun"]
-        elif variant == "s-nerf-w":
+                result_ = inference(models[typ], args, xyz_fine, z_vals, rays_d=None, sun_d=sun_d, rays_t=None)
+                result['weights_sc'] = result_["weights"]
+                result['transparency_sc'] = result_["transparency"]
+                result['sun_sc'] = result_["sun"]
+        elif variant == "sat-nerf":
             sun_d = rays[:, 8:11]
-            rays_t_ = models['t'](ts) if ts is not None else None
-            result = inference(models[typ], conf, xyz_fine, z_vals, rays_d=rays_d_, sun_d=sun_d, rays_t=rays_t_)
+            rays_t = models['t'](ts) if ts is not None else None
+            result = inference(models[typ], args, xyz_fine, z_vals, rays_d=None, sun_d=sun_d, rays_t=rays_t)
+            if args.sc_lambda > 0:
+                # solar correction
+                xyz_fine = rays_o.unsqueeze(1) + sun_d.unsqueeze(1) * z_vals.unsqueeze(2)  # (N_rays, N_samples, 3)
+                result_ = inference(models[typ], args, xyz_fine, z_vals, rays_d=None, sun_d=sun_d, rays_t=rays_t)
+                result['weights_sc'] = result_["weights"]
+                result['transparency_sc'] = result_["transparency"]
+                result['sun_sc'] = result_["sun"]
         else:
-            result = inference(models[typ], conf, xyz_fine, z_vals, rays_d=rays_d_, sun_d=None)
+            result = inference(models[typ], args, xyz_fine, z_vals, rays_d=rays_d)
         for k in result.keys():
             result_["{}_{}".format(k, typ)] = result[k]
 

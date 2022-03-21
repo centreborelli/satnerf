@@ -3,7 +3,7 @@ import numpy as np
 import os
 import json
 import rpcm
-from eval_aoi import load_nerf, batched_inference, save_nerf_output_to_images, find_best_embbeding_for_val_image
+from eval_satnerf import load_nerf, batched_inference, save_nerf_output_to_images, find_best_embbeding_for_val_image
 import torch
 import shutil
 from datasets import SatelliteDataset

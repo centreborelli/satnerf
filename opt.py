@@ -15,7 +15,7 @@ def get_opts():
                         help='root directory of the input dataset')
     parser.add_argument('--img_dir', type=str, default=None,
                         help='Directory where the images are located (if different than root_dir)')
-    parser.add_argument("--ckpts_dir", type=str, default="checkpoints",
+    parser.add_argument("--ckpts_dir", type=str, default="ckpts",
                         help="output directory to save trained models")
     parser.add_argument("--logs_dir", type=str, default="logs",
                         help="output directory to save experiment logs")

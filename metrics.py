@@ -73,26 +73,23 @@ class SatNerfLoss(torch.nn.Module):
         return loss, loss_dict
 
 class DepthLoss(torch.nn.Module):
-    def __init__(self, lambda_d=1.0):
+    def __init__(self, lambda_ds=1.0):
         super().__init__()
-        self.lambda_d = lambda_d
+        self.lambda_ds = lambda_ds
         self.loss = torch.nn.MSELoss(reduce=False)
 
-    def forward(self, inputs, targets, weights=None):
-        d = {}
-        d['c_d'] = self.loss(inputs['depth_coarse'], targets)
+    def forward(self, inputs, targets, weights=1.):
+        loss_dict = {}
+        typ = 'coarse'
+        loss_dict[f'{typ}_ds'] = self.loss(inputs['depth_coarse'], targets)
         if 'depth_fine' in inputs:
-            d['f_d'] = self.loss(inputs['depth_fine'], targets)
-
-        if weights is None:
-            for k in d.keys():
-                d[k] = self.lambda_d * torch.mean(d[k])
-        else:
-            for k in d.keys():
-                d[k] = self.lambda_d * torch.mean(weights * d[k])
-
-        loss = sum(l for l in d.values())
-        return loss, d
+            typ = 'fine'
+            loss_dict[f'{typ}_ds'] = self.loss(inputs['depth_fine'], targets)
+        # apply weights
+        for k in loss_dict.keys():
+            loss_dict[k] = self.lambda_ds * torch.mean(weights * loss_dict[k])
+        loss = sum(l for l in loss_dict.values())
+        return loss, loss_dict
 
 def load_loss(args):
     if args.model == "nerf":

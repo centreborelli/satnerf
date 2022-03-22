@@ -34,7 +34,7 @@ class NeRF_pl(pl.LightningModule):
         if self.depth:
             # depth supervision will be used
             self.depth_loss = DepthLoss(lambda_ds=args.ds_lambda)
-            self.ds_drop = np.round(args.ds_drop * args.training_iters)
+            self.ds_drop = np.round(args.ds_drop * args.max_train_steps)
         self.define_models()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
@@ -81,7 +81,7 @@ class NeRF_pl(pl.LightningModule):
         parameters = train_utils.get_parameters(self.models)
         self.optimizer = torch.optim.Adam(parameters, lr=self.args.lr, weight_decay=0)
 
-        max_epochs = self.get_current_epoch(self.args.train_steps)
+        max_epochs = self.get_current_epoch(self.args.max_train_steps)
         scheduler = train_utils.get_scheduler(optimizer=self.optimizer, lr_scheduler='step', num_epochs=max_epochs)
         return {
             'optimizer': self.optimizer,
@@ -102,7 +102,7 @@ class NeRF_pl(pl.LightningModule):
             b = DataLoader(self.train_dataset[1],
                            shuffle=True,
                            num_workers=4,
-                           batch_size=self.self.args.batch_size,
+                           batch_size=self.args.batch_size,
                            pin_memory=True)
             loaders["depth"] = b
         return loaders
@@ -132,7 +132,7 @@ class NeRF_pl(pl.LightningModule):
         if self.depth:
             tmp = self(batch["depth"]["rays"], batch["depth"]["ts"].squeeze())
             kp_depths = torch.flatten(batch["depth"]["depths"][:, 0])
-            kp_weights = None if self.args.depthloss_without_weights else torch.flatten(batch["depth"]["depths"][:, 1])
+            kp_weights = 1. if self.args.ds_noweights else torch.flatten(batch["depth"]["depths"][:, 1])
             loss_depth, tmp = self.depth_loss(tmp, kp_depths, kp_weights)
             if self.train_steps < self.ds_drop :
                 loss += loss_depth
@@ -246,7 +246,7 @@ def main():
                                                  save_top_k=-1,
                                                  every_n_val_epochs=args.save_every_n_epochs)
 
-    trainer = pl.Trainer(max_steps=args.train_steps,
+    trainer = pl.Trainer(max_steps=args.max_train_steps,
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,

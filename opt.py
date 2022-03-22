@@ -43,7 +43,7 @@ def get_opts():
                         help='batch size (number of input rays per iteration)')
     parser.add_argument('--img_downscale', type=float, default=1.0,
                         help='downscale factor for the input images')
-    parser.add_argument('--train_steps', type=int, default=300000,
+    parser.add_argument('--max_train_steps', type=int, default=300000,
                         help='number of training iterations')
     parser.add_argument('--save_every_n_epochs', type=int, default=4,
                         help="save checkpoints and debug files every n epochs")
@@ -67,6 +67,8 @@ def get_opts():
                         help='float that multiplies the depth supervision auxiliary loss')
     parser.add_argument('--ds_drop', type=float, default=0.25,
                         help='portion of training steps at which the depth supervision loss will be dropped')
+    parser.add_argument('--ds_noweights', action='store_true',
+                        help='do not use reprojection errors to weight depth supervision loss')
     parser.add_argument('--first_beta_epoch', type=int, default=2,
                         help='portion of training steps at which the depth supervision loss will be dropped')
     parser.add_argument('--t_embbeding_tau', type=int, default=4,

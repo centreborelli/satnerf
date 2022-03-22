@@ -17,6 +17,7 @@ import metrics
 import os
 import numpy as np
 import datetime
+from sat_utils import dsm_pointwise_abs_errors
 
 from eval_satnerf import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
 
@@ -214,7 +215,8 @@ class NeRF_pl(pl.LightningModule):
                             gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS_v2.tif")
                         else:
                             gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS.tif")
-                        mae_ = metrics.dsm_mae(out_path, gt_dsm_path, roi_metadata, gt_mask_path=gt_seg_path)
+                        abs_err = dsm_pointwise_abs_errors(out_path, gt_dsm_path, roi_metadata, gt_mask_path=gt_seg_path)
+                        mae_ = np.nanmean(abs_err)
                         os.remove(out_path)
                 except:
                     mae_ = np.nan
@@ -255,7 +257,7 @@ def main():
                          deterministic=True,
                          benchmark=True,
                          weights_summary=None,
-                         num_sanity_val_steps=1,
+                         num_sanity_val_steps=2,
                          check_val_every_n_epoch=1,
                          profiler="simple")
 

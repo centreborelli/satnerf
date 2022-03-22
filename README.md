@@ -38,9 +38,9 @@ conda init && bash -i create_conda_env.sh
 
 Warning: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code. E.g:
 ```
-export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/envs/satnerf/lib
+export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
 ```
-where `$CONDA_PREFIX` is the path to your conda or miniconda directory.
+where `$CONDA_PREFIX` is the path to your conda or miniconda environment (e.g. `/mnt/cdisk/roger/miniconda3/envs/satnerf`).
 
 You can download [here](https://drive.google.com/drive/folders/1l0Jx0-MrvmDd8WBpGcxDo8_KWLpKfGhK?usp=sharing) the training and test datasets, as well as some pretrained models.
 

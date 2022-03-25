@@ -17,7 +17,7 @@ import metrics
 import os
 import numpy as np
 import datetime
-from sat_utils import dsm_pointwise_abs_errors
+from sat_utils import compute_mae_and_save_dsm_diff
 
 from eval_satnerf import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
 
@@ -204,21 +204,17 @@ class NeRF_pl(pl.LightningModule):
                 # compute MAE
                 try:
                     aoi_id = batch["src_id"][0][:7]
-                    roi_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.txt")
+                    gt_roi_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.txt")
                     gt_dsm_path = os.path.join(self.args.gt_dir, aoi_id + "_DSM.tif")
-                    if os.path.exists(roi_path) and os.path.exists(gt_dsm_path):
-                        depth = results[f"depth_{typ}"]
-                        unique_identifier = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-                        out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm_{}.tif".format(unique_identifier))
-                        _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
-                        roi_metadata = np.loadtxt(roi_path)
-                        if aoi_id in ["JAX_004", "JAX_260"]:
-                            gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS_v2.tif")
-                        else:
-                            gt_seg_path = os.path.join(self.args.gt_dir, aoi_id + "_CLS.tif")
-                        abs_err = dsm_pointwise_abs_errors(out_path, gt_dsm_path, roi_metadata, gt_mask_path=gt_seg_path)
-                        mae_ = np.nanmean(abs_err)
-                        os.remove(out_path)
+                    assert os.path.exists(gt_roi_path), f"{gt_roi_path} not found"
+                    assert os.path.exists(gt_dsm_path), f"{gt_dsm_path} not found"
+                    depth = results[f"depth_{typ}"]
+                    unique_identifier = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                    out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm_{}.tif".format(unique_identifier))
+                    _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
+                    mae_ = compute_mae_and_save_dsm_diff(out_path, batch["src_id"][0],
+                                                         self.args.gt_dir, self.val_im_dir, 0, save=False)
+                    os.remove(out_path)
                 except:
                     mae_ = np.nan
 

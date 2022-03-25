@@ -12,6 +12,11 @@ import numpy as np
 import sat_utils
 import train_utils
 import argparse
+import glob
+import shutil
+
+import warnings
+warnings.filterwarnings("ignore")
 
 #os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
@@ -140,17 +145,6 @@ def save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number):
             out_path = "{}/sky/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
             train_utils.save_output_image(sky_rgb.cpu().view(H, W, 3).permute(2, 0, 1).cpu(), out_path, src_path)
 
-def compute_mae_and_save_dsm_errs(pred_dsm_path, roi_path, gt_dsm_path, out_dir, src_id, epoch_number):
-    # save dsm errs
-    from metrics import dsm_pointwise_abs_errors
-    if os.path.exists(roi_path) and os.path.exists(gt_dsm_path):
-        roi_metadata = np.loadtxt(roi_path)
-        out_path1 = "{}/dsm_errs/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-        out_path2 = "{}/dsm_errs2/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-        abs_err = dsm_pointwise_abs_errors(pred_dsm_path, gt_dsm_path, roi_metadata, gt_mask_path=None,
-                                           out_rdsm_path=out_path2, out_err_path=out_path1)
-    return np.nanmean(abs_err.ravel())
-
 def find_best_embbeding_for_val_image(models, rays, conf, gt_rgbs, train_indices=None):
 
     best_ts = None
@@ -218,73 +212,54 @@ def predefined_val_ts(img_id):
 
 def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=None):
 
-    #gpu_idx = 1
-    #run_id = "2021-07-14_00-00-00_snerfw_mask_attempt2"
-    #epoch_number = "15"
+    with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
+        args = argparse.Namespace(**json.load(f))
 
-    log_path = os.path.join(logs_dir, run_id)
-    with open('{}/opts.json'.format(log_path), 'r') as f:
-            args = json.load(f)
+    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
 
-    args["root_dir"] = "/mnt/cdisk/roger/Datasets" + args["root_dir"].split("Datasets")[-1]
-    args["img_dir"] = "/mnt/cdisk/roger/Datasets" + args["img_dir"].split("Datasets")[-1]
-    args["cache_dir"] = "/mnt/cdisk/roger/Datasets" + args["cache_dir"].split("Datasets")[-1]
-    args["gt_dir"] = "/mnt/cdisk/roger/Datasets" + args["gt_dir"].split("Datasets")[-1]
-    # load nerf
+    # load pretrained nerf
     if checkpoints_dir is None:
-        checkpoints_dir = args["checkpoints_dir"]
-    models, conf = load_nerf(run_id, log_path, checkpoints_dir, epoch_number-1, args)
+        checkpoints_dir = args.ckpts_dir
+    models = load_nerf(run_id, logs_dir, checkpoints_dir, epoch_number-1)
 
-    # load dataset
-    dataset = SatelliteDataset(args["root_dir"], args["img_dir"], split="val",
-                               img_downscale=args["img_downscale"], cache_dir=args["cache_dir"])
-
-    with open(os.path.join(args["root_dir"], "train.txt"), "r") as f:
-        train_jsons = f.read().split("\n")
-        n_train = len(train_jsons)
-
-    if conf.name == "s-nerf-w" or (conf.name == "s-nerf" and args["uncertainty"]):
-        train_indices = torch.arange(n_train)
-        if split == "val":
-            val_t_indices = find_best_embeddings_for_val_dataset(dataset, models, conf, train_indices)
-        else:
-            val_t_indices = train_indices.numpy()
-    else:
-        if split == "val":
-            val_t_indices = [None]*len(dataset)
-        else:
-            val_t_indices = [None]*n_train
-
+    # prepare dataset
+    dataset = SatelliteDataset(args.root_dir, args.img_dir, split="val",
+                               img_downscale=args.img_downscale, cache_dir=args.cache_dir)
     if split == "train":
-        with open(os.path.join(args["root_dir"], "train.txt"), "r") as f:
+        with open(os.path.join(args.root_dir, "train.txt"), "r") as f:
             json_files = f.read().split("\n")
-        dataset.json_files = [os.path.join(args["root_dir"], json_p) for json_p in json_files]
-        dataset.all_ids = [i for i, p, in enumerate(dataset.json_files)]
+        dataset.json_files = [os.path.join(args.root_dir, json_p) for json_p in json_files]
+        dataset.all_ids = [i for i, p in enumerate(dataset.json_files)]
         samples_to_eval = np.arange(0, len(dataset))
     else:
         samples_to_eval = np.arange(1, len(dataset))
 
-    psnr = []
-    ssim = []
-    mae = []
+    psnr, ssim, mae = [], [], []
 
     for i in samples_to_eval:
+
         sample = dataset[i]
         rays, rgbs = sample["rays"].cuda(), sample["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
-        src_id = sample["src_id"]
+        src_id  = sample["src_id"]
         if "h" in sample and "w" in sample:
             W, H = sample["w"], sample["h"]
         else:
             W = H = int(torch.sqrt(torch.tensor(rays.shape[0]).float()))
 
-        if val_t_indices[i] is None:
-            ts = None
-        else:
-            ts = val_t_indices[i] * torch.ones(rays.shape[0], 1).long().cuda().squeeze()
+        ts = None
+        if args.model == "sat-nerf":
+            if split == "val":
+                t = predefined_val_ts(src_id)
+                ts = t * torch.ones(rays.shape[0], 1).long().cuda().squeeze()
+            else:
+                ts = sample["ts"].cuda().squeeze()
 
-        results = batched_inference(models, rays, ts, conf)
+        results = batched_inference(models, rays, ts, args)
 
         for k in sample.keys():
             if torch.is_tensor(sample[k]):
@@ -304,14 +279,21 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=
 
         # geometry metrics
         pred_dsm_path = "{}/dsm/{}_epoch{}.tif".format(out_dir, src_id, epoch_number)
-        aoi_id = src_id[:7]
-        roi_path = os.path.join(args["gt_dir"], aoi_id + "_DSM.txt")
-        gt_dsm_path = os.path.join(args["gt_dir"], aoi_id + "_DSM.tif")
-        mae_ = compute_mae_and_save_dsm_errs(pred_dsm_path, roi_path, gt_dsm_path, out_dir, src_id, epoch_number)
+        mae_ = sat_utils.compute_mae_and_save_dsm_diff(pred_dsm_path, src_id, args.gt_dir, out_dir, epoch_number)
         mae.append(mae_)
-        os.system(f"rm tmp*.tif.xml")
-
         print("{}: pnsr {:.3f} / ssim {:.3f} / mae {:.3f}".format(src_id, psnr_, ssim_, mae_))
+
+        # clean files
+        in_tmp_path = glob.glob(os.path.join(out_dir, "*rdsm_epoch*.tif"))[0]
+        out_tmp_path = in_tmp_path.replace(out_dir, os.path.join(out_dir, "rdsm"))
+        os.makedirs(os.path.dirname(out_tmp_path), exist_ok=True)
+        shutil.copyfile(in_tmp_path, out_tmp_path)
+        os.remove(in_tmp_path)
+        in_tmp_path = glob.glob(os.path.join(out_dir, "*rdsm_diff_epoch*.tif"))[0]
+        out_tmp_path = in_tmp_path.replace(out_dir, os.path.join(out_dir, "rdsm_diff"))
+        os.makedirs(os.path.dirname(out_tmp_path), exist_ok=True)
+        shutil.copyfile(in_tmp_path, out_tmp_path)
+        os.remove(in_tmp_path)
 
     print("\nMean PSNR: {:.3f}".format(np.mean(np.array(psnr))))
     print("Mean SSIM: {:.3f}".format(np.mean(np.array(ssim))))

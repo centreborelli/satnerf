@@ -6,7 +6,7 @@ import numpy as np
 import os
 
 import torch
-from .satellite import SatelliteDataset
+from .satellite import SatelliteDataset, get_rays
 from torchvision import transforms as T
 
 from PIL import Image
@@ -63,7 +63,7 @@ class SatelliteDataset_depth(SatelliteDataset):
             # build the sparse batch of rays for depth supervision
             cols, rows = pts2d.T
             min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
-            rays = sat_utils.get_rays(cols, rows, rpc, min_alt, max_alt)
+            rays = get_rays(cols, rows, rpc, min_alt, max_alt)
             rays = self.normalize_rays(rays)
             all_rays += [rays]
 

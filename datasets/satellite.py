@@ -7,12 +7,78 @@ import os
 
 import torch
 from torch.utils.data import Dataset
-
+from PIL import Image
+from torchvision import transforms as T
 
 import rasterio
 import rpcm
 import glob
 import sat_utils
+
+def get_rays(cols, rows, rpc, min_alt, max_alt):
+    """
+            Draw a set of rays from a satellite image
+            Each ray is defined by an origin 3d point + a direction vector
+            First the bounds of each ray are found by localizing each pixel at min and max altitude
+            Then the corresponding direction vector is found by the difference between such bounds
+            Args:
+                cols: 1d array with image column coordinates
+                rows: 1d array with image row coordinates
+                rpc: RPC model with the localization function associated to the satellite image
+                min_alt: float, the minimum altitude observed in the image
+                max_alt: float, the maximum altitude observed in the image
+            Returns:
+                rays: (h*w, 8) tensor of floats encoding h*w rays
+                      columns 0,1,2 correspond to the rays origin
+                      columns 3,4,5 correspond to the direction vector
+                      columns 6,7 correspond to the distance of the ray bounds with respect to the camera
+            """
+
+    min_alts = float(min_alt) * np.ones(cols.shape)
+    max_alts = float(max_alt) * np.ones(cols.shape)
+
+    # assume the points of maximum altitude are those closest to the camera
+    lons, lats = rpc.localization(cols, rows, max_alts)
+    x_near, y_near, z_near = sat_utils.latlon_to_ecef_custom(lats, lons, max_alts)
+    xyz_near = np.vstack([x_near, y_near, z_near]).T
+
+    # similarly, the points of minimum altitude are the furthest away from the camera
+    lons, lats = rpc.localization(cols, rows, min_alts)
+    x_far, y_far, z_far = sat_utils.latlon_to_ecef_custom(lats, lons, min_alts)
+    xyz_far = np.vstack([x_far, y_far, z_far]).T
+
+    # define the rays origin as the nearest point coordinates
+    rays_o = xyz_near
+
+    # define the unit direction vector
+    d = xyz_far - xyz_near
+    rays_d = d / np.linalg.norm(d, axis=1)[:, np.newaxis]
+
+    # assume the nearest points are at distance 0 from the camera
+    # the furthest points are at distance Euclidean distance(far - near)
+    fars = np.linalg.norm(d, axis=1)
+    nears = float(0) * np.ones(fars.shape)
+
+    # create a stack with the rays origin, direction vector and near-far bounds
+    rays = torch.from_numpy(np.hstack([rays_o, rays_d, nears[:, np.newaxis], fars[:, np.newaxis]]))
+    rays = rays.type(torch.FloatTensor)
+    return rays
+
+def load_tensor_from_rgb_geotiff(img_path, downscale_factor, imethod=Image.BICUBIC):
+    with rasterio.open(img_path, 'r') as f:
+        img = np.transpose(f.read(), (1, 2, 0)) / 255.
+    h, w = img.shape[:2]
+    if downscale_factor > 1:
+        w = int(w // downscale_factor)
+        h = int(h // downscale_factor)
+        img = np.transpose(img, (2, 0, 1))
+        img = T.Resize(size=(h, w), interpolation=imethod)(torch.Tensor(img))
+        img = np.transpose(img.numpy(), (1, 2, 0))
+    img = T.ToTensor()(img)  # (3, h, w)
+    rgbs = img.view(3, -1).permute(1, 0)  # (h*w, 3)
+    rgbs = rgbs.type(torch.FloatTensor)
+    return rgbs
+
 
 class SatelliteDataset(Dataset):
     def __init__(self, root_dir, img_dir, split="train", img_downscale=1.0, cache_dir=None):
@@ -77,7 +143,7 @@ class SatelliteDataset(Dataset):
             rpc = sat_utils.rescale_rpc(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / self.img_downscale)
             min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
             cols, rows = np.meshgrid(np.arange(w), np.arange(h))
-            rays = sat_utils.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
+            rays = get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
             all_rays += [rays]
         all_rays = torch.cat(all_rays, 0)
         near_points = all_rays[:, :3]
@@ -113,7 +179,7 @@ class SatelliteDataset(Dataset):
             img_id = sat_utils.get_file_id(d["img"])
 
             # get rgb colors
-            rgbs = sat_utils.load_tensor_from_rgb_geotiff(img_p, self.img_downscale)
+            rgbs = load_tensor_from_rgb_geotiff(img_p, self.img_downscale)
 
             # get rays
             cache_path = "{}/{}.data".format(self.cache_dir, img_id)
@@ -124,7 +190,7 @@ class SatelliteDataset(Dataset):
                 rpc = sat_utils.rescale_rpc(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / self.img_downscale)
                 min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
                 cols, rows = np.meshgrid(np.arange(w), np.arange(h))
-                rays = sat_utils.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
+                rays = get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
                 if self.cache_dir is not None:
                     os.makedirs(os.path.dirname(cache_path), exist_ok=True)
                     torch.save(rays, cache_path)

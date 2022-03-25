@@ -29,8 +29,8 @@ def solar_correction(loss_dict, inputs, typ, lambda_sc=0.05):
     sun_sc = inputs[f'sun_sc_{typ}'].squeeze()
     term2 = torch.sum(torch.square(inputs[f'transparency_sc_{typ}'].detach() - sun_sc), -1)
     term3 = 1 - torch.sum(inputs[f'weights_sc_{typ}'].detach() * sun_sc, -1)
-    loss_dict[f'{typ}_sc_term2'] = lambda_sc * torch.mean(term2)
-    loss_dict[f'{typ}_sc_term3'] = lambda_sc * torch.mean(term3)
+    loss_dict[f'{typ}_sc_term2'] = lambda_sc/3. * torch.mean(term2)
+    loss_dict[f'{typ}_sc_term3'] = lambda_sc/3. * torch.mean(term3)
     return loss_dict
 
 class SNerfLoss(torch.nn.Module):

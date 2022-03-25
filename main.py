@@ -40,13 +40,11 @@ class NeRF_pl(pl.LightningModule):
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0
-        self.use_ts = False
 
+        self.use_ts = False
         if self.args.model == "sat-nerf":
-            self.use_ts = True
             self.loss_without_beta = SNerfLoss(lambda_sc=args.sc_lambda)
-            self.embedding_t = torch.nn.Embedding(args.t_embbeding_vocab, args.t_embbeding_tau)
-            self.models["t"] = self.embedding_t
+            self.use_ts = True
 
     def define_models(self):
         self.models = {}
@@ -55,6 +53,9 @@ class NeRF_pl(pl.LightningModule):
         if self.args.n_importance > 0:
             self.nerf_fine = load_model(self.args)
             self.models['fine'] = self.nerf_fine
+        if self.args.model == "sat-nerf":
+            self.embedding_t = torch.nn.Embedding(self.args.t_embbeding_vocab, self.args.t_embbeding_tau)
+            self.models["t"] = self.embedding_t
 
     def forward(self, rays, ts):
 

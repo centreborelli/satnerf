@@ -39,7 +39,7 @@ def get_opts():
     # training and network configuration
     parser.add_argument('--lr', type=float, default=5e-4,
                         help='initial learning rate')
-    parser.add_argument('--batch_size', type=float, default=1024,
+    parser.add_argument('--batch_size', type=int, default=1024,
                         help='batch size (number of input rays per iteration)')
     parser.add_argument('--img_downscale', type=float, default=1.0,
                         help='downscale factor for the input images')
@@ -57,7 +57,7 @@ def get_opts():
                         help='number of fine scale discrete points per input ray')
     parser.add_argument('--noise_std', type=float, default=0.0,
                         help='standard deviation of noise added to sigma to regularize')
-    parser.add_argument('--chunk', type=float, default=1024*5,
+    parser.add_argument('--chunk', type=int, default=1024*5,
                         help='maximum number of rays that can be processed at once without memory issues')
 
     # other sat-nerf specific stuff

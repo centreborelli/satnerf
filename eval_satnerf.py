@@ -3,7 +3,7 @@ import yaml
 import os
 import json
 import train_utils
-from models import NeRF
+from models import load_model
 from datasets import SatelliteDataset
 from rendering import render_rays
 from collections import defaultdict
@@ -11,6 +11,7 @@ import metrics
 import numpy as np
 import sat_utils
 import train_utils
+import argparse
 
 #os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
 
@@ -38,15 +39,15 @@ def load_ckpt(model, ckpt_path, model_name='model', prefixes_to_ignore=[]):
     model.load_state_dict(model_dict)
 
 @torch.no_grad()
-def batched_inference(models, rays, ts, conf):
+def batched_inference(models, rays, ts, args):
     """Do batched inference on rays using chunk."""
-    chunk_size = conf.training.chunk
+    chunk_size = args.chunk
     batch_size = rays.shape[0]
 
     results = defaultdict(list)
     for i in range(0, batch_size, chunk_size):
         rendered_ray_chunks = \
-            render_rays(models, conf, rays[i:i + chunk_size],
+            render_rays(models, args, rays[i:i + chunk_size],
                         ts[i:i + chunk_size] if ts is not None else None)
         for k, v in rendered_ray_chunks.items():
             results[k] += [v]
@@ -59,62 +60,32 @@ def batched_inference(models, rays, ts, conf):
 
     return results
 
-def load_nerf(run_id, log_path, checkpoints_dir, epoch_number, args):
+def load_nerf(run_id, logs_dir, ckpts_dir, epoch_number):
 
-    checkpoint_path = os.path.join(checkpoints_dir, "{}/epoch={}.ckpt".format(run_id, epoch_number))
+    log_path = os.path.join(logs_dir, run_id)
+    with open('{}/opts.json'.format(log_path), 'r') as f:
+        args = argparse.Namespace(**json.load(f))
+
+    checkpoint_path = os.path.join(ckpts_dir, "{}/epoch={}.ckpt".format(run_id, epoch_number))
     print("Using", checkpoint_path)
     if not os.path.exists(checkpoint_path):
         raise FileNotFoundError("Could not find checkpoint {}".format(checkpoint_path))
 
-    with open("{}/version_0/hparams.yaml".format(log_path), 'r') as stream:
-        conf_dict = yaml.safe_load(stream)
-        if conf_dict["name"] == "nerf":
-            conf = DefaultConfig(**conf_dict)
-        if conf_dict["name"] == "s-nerf":
-            conf = SNerfBasicConfig(**conf_dict)
-        if conf_dict["name"] == "s-nerf-w":
-            conf = SNerfWBasicConfig(**conf_dict)
-        conf.training = TrainingConfig(**conf.training)
-
     # load models
     models = {}
-
-    if conf.name in ["s-nerf-w", "s-nerf"] and args["uncertainty"]:
-        embedding_t = torch.nn.Embedding(conf.N_vocab, conf.N_tau)
+    nerf_coarse = load_model(args)
+    load_ckpt(nerf_coarse, checkpoint_path, model_name='nerf_coarse')
+    models["coarse"] = nerf_coarse.cuda('cuda:0').eval()
+    if args.n_importance > 0:
+        nerf_fine = load_model(args)
+        load_ckpt(nerf_coarse, checkpoint_path, model_name='nerf_fine')
+        models['fine'] = nerf_fine.cuda('cuda:0').eval()
+    if args.model == "sat-nerf":
+        embedding_t = torch.nn.Embedding(args.t_embbeding_vocab, args.t_embbeding_tau)
         load_ckpt(embedding_t, checkpoint_path, model_name='embedding_t')
         models["t"] = embedding_t.cuda('cuda:0').cuda()
-        t_embbeding_size = conf.N_tau
-    else:
-        t_embbeding_size = 0
 
-    nerf_coarse = NeRF(layers=conf.layers,
-                       feat=conf.feat,
-                       input_sizes=conf.input_sizes,
-                       skips=conf.skips,
-                       siren=conf.siren,
-                       mapping=conf.mapping,
-                       mapping_sizes=conf.mapping_sizes,
-                       variant=conf.name,
-                       t_embedding_dims=t_embbeding_size,
-                       predict_uncertainty=args["uncertainty"])
-    load_ckpt(nerf_coarse, checkpoint_path, model_name='nerf_coarse')
-    nerf_coarse.cuda('cuda:0').eval()
-    models["coarse"] = nerf_coarse
-    if conf.n_importance > 0:
-        nerf_fine = NeRF(layers=conf.layers,
-                         feat=conf.feat,
-                         input_sizes=conf.input_sizes,
-                         skips=conf.skips,
-                         siren=conf.siren,
-                         mapping=conf.mapping,
-                         mapping_sizes=conf.mapping_sizes,
-                         variant=conf.name,
-                         t_embedding_dims=t_embbeding_size,
-                         predict_uncertainty=args["uncertainty"])
-        load_ckpt(nerf_fine, checkpoint_path, model_name='nerf_fine')
-        nerf_fine.cuda().eval()
-        models["fine"] = nerf_fine
-    return models, conf
+    return models
 
 def save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number):
 

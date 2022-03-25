@@ -56,7 +56,7 @@ def render_rays(models, args, rays, ts):
     N_importance = args.n_importance
     variant = args.model
     use_disp = False
-    perturb = False
+    perturb = 1.0
 
     # get rays
     rays_o, rays_d, near, far = rays[:, 0:3],  rays[:, 3:6], rays[:, 6:7], rays[:, 7:8]

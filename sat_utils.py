@@ -11,6 +11,8 @@ import json
 from PIL import Image
 from torchvision import transforms as T
 import torch
+import glob
+import rpcm
 
 def get_file_id(filename):
     """
@@ -262,3 +264,41 @@ def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_pat
 def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None):
     abs_err = dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=gt_mask_path)
     return np.nanmean(abs_err.ravel())
+
+def sort_by_increasing_view_incidence_angle(root_dir):
+    incidence_angles = []
+    json_paths = glob.glob(os.path.join(root_dir, "*.json"))
+    for json_p in json_paths:
+        with open(json_p) as f:
+            d = json.load(f)
+        rpc = rpcm.RPCModel(d["rpc"], dict_format="rpcm")
+        c_lon, c_lat = d["geojson"]["center"][0], d["geojson"]["center"][1]
+        alpha, _ = rpc.incidence_angles(c_lon, c_lat, z=0) # alpha = view incidence angle in degrees
+        incidence_angles.append(alpha)
+    return [x for _, x in sorted(zip(incidence_angles, json_paths))]
+
+def sort_by_increasing_solar_incidence_angle(root_dir):
+    solar_incidence_angles = []
+    json_paths = glob.glob(os.path.join(root_dir, "*.json"))
+    for json_p in json_paths:
+        with open(json_p) as f:
+            d = json.load(f)
+        sun_el = np.radians(float(d["sun_elevation"]))
+        sun_az = np.radians(float(d["sun_azimuth"]))
+        sun_d = np.array([np.sin(sun_az) * np.cos(sun_el), np.cos(sun_az) * np.cos(sun_el), np.sin(sun_el)])
+        surface_normal = np.array([0., 0., 1.0])
+        u1 = sun_d / np.linalg.norm(sun_d)
+        u2 = surface_normal / np.linalg.norm(surface_normal)
+        alpha = np.degrees(np.arccos(np.dot(u1, u2))) # alpha = solar incidence angle in degrees
+        solar_incidence_angles.append(alpha)
+    return [x for _, x in sorted(zip(solar_incidence_angles, json_paths))]
+
+def sort_by_acquisition_date(root_dir):
+    acquisition_dates = []
+    json_paths = glob.glob(os.path.join(root_dir, "*.json"))
+    for json_p in json_paths:
+        with open(json_p) as f:
+            d = json.load(f)
+        date_str = d["acquisition_date"]
+        acquisition_dates.append(datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S'))
+    return [x for _, x in sorted(zip(acquisition_dates, json_paths))]

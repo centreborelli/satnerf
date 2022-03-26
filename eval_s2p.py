@@ -8,7 +8,7 @@ import rasterio
 import shutil
 import datetime
 from osgeo import gdal
-
+from sat_utils import compute_mae_and_save_dsm_diff
 
 def geojson_polygon(coords_array):
     """
@@ -58,94 +58,6 @@ def read_DFC2019_lonlat_aoi(aoi_id, dfc_dir):
     lonlat_bbx = geojson_polygon(np.vstack((lons, lats)).T)
     return lonlat_bbx
 
-def dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None, out_rdsm_path=None, out_err_path=None):
-    """
-    in_dsm_path is a string with the path to the NeRF generated dsm
-    gt_dsm_path is a string with the path to the reference lidar dsm
-    bbx_metadata is a 4-valued array with format (x, y, s, r)
-    where [x, y] = offset of the dsm bbx, s = width = height, r = resolution (m per pixel)
-    """
-
-    unique_identifier = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    pred_dsm_path = "tmp_crop_dsm_to_delete_{}.tif".format(unique_identifier)
-    pred_rdsm_path = "tmp_crop_rdsm_to_delete_{}.tif".format(unique_identifier)
-
-    # read dsm metadata
-    xoff, yoff = dsm_metadata[0], dsm_metadata[1]
-    xsize, ysize = int(dsm_metadata[2]), int(dsm_metadata[2])
-    resolution = dsm_metadata[3]
-
-    # define projwin for gdal translate
-    ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
-
-    # crop predicted dsm using gdal translate
-    ds = gdal.Open(in_dsm_path)
-    ds = gdal.Translate(pred_dsm_path, ds, projWin=[ulx, uly, lrx, lry])
-    ds = None
-    # os.system("gdal_translate -projwin {} {} {} {} {} {}".format(ulx, uly, lrx, lry, source_path, crop_path))
-    if gt_mask_path is not None:
-        with rasterio.open(gt_mask_path, "r") as f:
-            mask = f.read()[0, :, :]
-            water_mask = mask.copy()
-            water_mask[mask != 9] = 0
-            water_mask[mask == 9] = 1
-        with rasterio.open(pred_dsm_path, "r") as f:
-            profile = f.profile
-            pred_dsm = f.read()[0, :, :]
-        with rasterio.open(pred_dsm_path, 'w', **profile) as dst:
-            pred_dsm[water_mask.astype(bool)] = np.nan
-            dst.write(pred_dsm, 1)
-        tmp_gt_path = os.path.join(os.path.dirname(out_rdsm_path), "tmp_gt_{}.tif".format(unique_identifier))
-        with rasterio.open(gt_dsm_path, "r") as f:
-            gt_dsm = f.read()[0, :, :]
-        with rasterio.open(tmp_gt_path, 'w', **profile) as dst:
-            gt_dsm[water_mask.astype(bool)] = np.nan
-            dst.write(gt_dsm, 1)
-        gt_dsm_path = tmp_gt_path
-
-    # read predicted and gt dsms
-    with rasterio.open(gt_dsm_path, "r") as f:
-        gt_dsm = f.read()[0, :, :]
-        kwds = f.profile
-    with rasterio.open(pred_dsm_path, "r") as f:
-        profile = f.profile
-        pred_dsm = f.read()[0, :, :]
-
-    # register and compute mae
-    fix_xy = False
-    try:
-        import dsmr
-    except:
-        print("Warning: dsmr not found ! DSM registration will only use the Z dimension")
-        fix_xy = True
-    if fix_xy:
-        pred_rdsm = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
-        with rasterio.open(pred_rdsm_path, 'w', **profile) as dst:
-            dst.write(pred_rdsm, 1)
-    else:
-        import dsmr
-        transform = dsmr.compute_shift(gt_dsm_path, pred_dsm_path, scaling=False)
-        dsmr.apply_shift(pred_dsm_path, pred_rdsm_path, *transform)
-        with rasterio.open(pred_rdsm_path, "r") as f:
-            pred_rdsm = f.read()[0, :, :]
-    abs_err = pred_rdsm - gt_dsm
-
-    # remove tmp files and write output tifs if desired
-    os.remove(pred_dsm_path)
-    if out_rdsm_path is not None:
-        if os.path.exists(out_rdsm_path):
-            os.remove(out_rdsm_path)
-        os.makedirs(os.path.dirname(out_rdsm_path), exist_ok=True)
-        shutil.copyfile(pred_rdsm_path, out_rdsm_path)
-    os.remove(pred_rdsm_path)
-    if out_err_path is not None:
-        if os.path.exists(out_err_path):
-            os.remove(out_err_path)
-        os.makedirs(os.path.dirname(out_err_path), exist_ok=True)
-        with rasterio.open(out_err_path, 'w', **profile) as dst:
-            dst.write(abs_err, 1)
-
-    return abs(abs_err)
 
 #######################################################################################
 #######################################################################################
@@ -313,7 +225,7 @@ def project_cloud_into_utm_grid(xyz, bb, definition, mode, mask=None):
     
     return raw_map_np
 
-def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n_pairs=1, crops=True):
+def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", n_pairs=1, resolution=0.5, crops=False):
 
     if crops:
         print("using crops")
@@ -323,8 +235,8 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
         img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
 
     out_dir = os.path.join(output_dir, aoi_id)
-    #if os.path.exists(out_dir):
-    #    shutil.rmtree(out_dir)
+    if os.path.exists(out_dir):
+        shutil.rmtree(out_dir)
 
     heuristic = True
     heuristic_pairs_file = os.path.join(dfc_dir, "DFC2019_JAX_heuristic_pairs.txt")
@@ -352,25 +264,21 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
     profile["width"] = raster.shape[1]
     profile["count"] = 1
     profile["driver"] = "GTiff"
-    mvs_dsm_path = os.path.join(out_dir, "mvs_dsm_{}_pairs_avg.tif".format(n_pairs))
+    mvs_dsm_path = os.path.join(out_dir, "{}_mvs_dsm_{}_pairs_avg.tif".format(aoi_id, n_pairs))
     with rasterio.open(mvs_dsm_path, "w", **profile) as f:
         f.write(raster[:, :, 0], 1)
     # evaluate s2p generated mvs DSM
-    gt_dsm_path = os.path.join(dfc_dir, "Track3-Truth/{}_DSM.tif".format(aoi_id))
-    gt_roi_metadata = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/{}_DSM.txt".format(aoi_id)))
-    if aoi_id in ["JAX_004", "JAX_260"]:
-        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS_v2.tif".format(aoi_id))
-    else:
-        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
-    rmvs_dsm_path = os.path.join(out_dir, "rmvs_avg_dsm_{}_pairs.tif".format(n_pairs))
-    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path)
-    print("Path to output S2P MVS DSM: {}".format(mvs_dsm_path))
-    print("Altitude MAE: {}".format(np.nanmean(abs_err)))
-    shutil.copyfile(rmvs_dsm_path, rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(np.nanmean(abs_err))))
+    gt_dir = os.path.join(dfc_dir, "Track3-Truth")
+    out_dir = os.path.join(output_dir, aoi_id)
+    mae = compute_mae_and_save_dsm_diff(mvs_dsm_path, aoi_id, gt_dir, out_dir, "_")
+    rmvs_dsm_path = os.path.join(out_dir, f"{aoi_id}_rdsm_epoch_.tif")
+    shutil.copyfile(rmvs_dsm_path, rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(mae)))
     with rasterio.open(rmvs_dsm_path, "r") as f:
         avg_dsm = f.read(1)
         profile = f.profile
     os.remove(rmvs_dsm_path)
+    print("Path to output S2P MVS DSM: {}".format(mvs_dsm_path))
+    print("Altitude MAE (mean alt fusion): {}".format(mae))
 
     # merge s2p pairwise dsms (median)
     from s2p import ply
@@ -391,21 +299,16 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", resolution=0.5, n
     with rasterio.open(mvs_dsm_path, "w", **profile) as f:
         f.write(med_dsm, 1)
     # evaluate s2p generated mvs DSM
-    gt_dsm_path = os.path.join(dfc_dir, "Track3-Truth/{}_DSM.tif".format(aoi_id))
-    gt_roi_metadata = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/{}_DSM.txt".format(aoi_id)))
-    if aoi_id in ["JAX_004", "JAX_260"]:
-        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS_v2.tif".format(aoi_id))
-    else:
-        gt_seg_path = os.path.join(dfc_dir, "Track3-Truth/{}_CLS.tif".format(aoi_id))
-    rmvs_dsm_path = os.path.join(out_dir, "rmvs_med_dsm_{}_pairs.tif".format(n_pairs))
-    rmvs_err_path = os.path.join(out_dir, "rmvs_med_err_{}_pairs.tif".format(n_pairs))
-    abs_err = dsm_pointwise_abs_errors(mvs_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path, out_rdsm_path=rmvs_dsm_path, out_err_path=rmvs_err_path)
-    print("Altitude MAE: {}".format(np.nanmean(abs_err)))
+    mae = compute_mae_and_save_dsm_diff(mvs_dsm_path, aoi_id, gt_dir, out_dir, "")
+    rmvs_dsm_path = os.path.join(out_dir, f"{aoi_id}_rdsm_epoch.tif")
+    shutil.copyfile(rmvs_dsm_path, rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(mae)))
+    print("Path to output S2P MVS DSM: {}".format(mvs_dsm_path))
+    print("Altitude MAE (median alt fusion): {}".format(mae))
     with rasterio.open(rmvs_dsm_path, "r") as f:
         med_dsm = f.read(1)
     med_nans = np.isnan(med_dsm)
     med_dsm[med_nans] = avg_dsm[med_nans]
-    with rasterio.open(rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(np.nanmean(abs_err))), "w+", **profile) as f:
+    with rasterio.open(rmvs_dsm_path.replace(".tif", "_int.tif"), "w+", **profile) as f:
         f.write(med_dsm, 1)
     os.remove(rmvs_dsm_path)
     

@@ -2,20 +2,23 @@ import glob
 import numpy as np
 import os
 import json
-import rpcm
-from eval_satnerf import load_nerf, batched_inference, save_nerf_output_to_images, find_best_embbeding_for_val_image
 import torch
 import shutil
-from datasets import SatelliteDataset
+import argparse
+import rasterio
 
-from datetime import datetime
+from datasets import SatelliteDataset
+import sat_utils
+from eval_satnerf import load_nerf, batched_inference, save_nerf_output_to_images, predefined_val_ts
+
+from PIL import Image
+import cv2
+import rpcm
+
 
 import warnings
 warnings.filterwarnings("ignore")
 
-import rasterio
-from PIL import Image
-import cv2
 
 def hstack_sun_tifs(img_paths, crop=True):
     images = []
@@ -64,7 +67,7 @@ def quickly_interpolate_nans_from_singlechannel_img(image, method='nearest'):
     interp_image[missing_y, missing_x] = interp_values
     return interp_image
 
-def hstack_dsm_tifs_v2(img_paths, cmap=cv2.COLORMAP_VIRIDIS, crop=True, vmax=None, vmin=None):
+def hstack_dsm_tifs_v1(img_paths, cmap=cv2.COLORMAP_VIRIDIS, crop=True, vmax=None, vmin=None):
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
@@ -94,7 +97,7 @@ def hstack_dsm_tifs_v2(img_paths, cmap=cv2.COLORMAP_VIRIDIS, crop=True, vmax=Non
 import sys
 sys.path.append('/home/roger/demtk')
 import iio, demtk
-def hstack_dsm_tifs_v1(img_paths, crop=True):
+def hstack_dsm_tifs_v2(img_paths, crop=True):
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
@@ -110,27 +113,28 @@ def hstack_dsm_tifs_v1(img_paths, crop=True):
     img = np.hstack(images)
     return img
 
-def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None):
+def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None, crops=True):
 
-    log_path = os.path.join(logs_dir, run_id)
-    with open('{}/opts.json'.format(log_path), 'r') as f:
-            args = json.load(f)
+    with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
+        args = argparse.Namespace(**json.load(f))
 
-    json_paths = glob.glob(os.path.join(args["root_dir"], "*.json"))
-    incidence_angles, solar_incidence_angles, solar_dir_vectors = [], [], []
-    dates = []
+    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+
+    # load pretrained nerf
+    if checkpoints_dir is None:
+        checkpoints_dir = args.ckpts_dir
+    models = load_nerf(run_id, logs_dir, checkpoints_dir, epoch_number-1)
+
+    json_paths = glob.glob(os.path.join(args.root_dir, "*.json"))
+    solar_incidence_angles, solar_dir_vectors = [], []
     for json_p in json_paths:
         # read json
         with open(json_p) as f:
             d = json.load(f)
-
-        # image incidence angle
-        rpc = rpcm.RPCModel(d["rpc"], dict_format="rpcm")
-        c_lon, c_lat = d["geojson"]["center"][0], d["geojson"]["center"][1]
-        alpha, _ = rpc.incidence_angles(c_lon, c_lat, z=0)
-        incidence_angles.append(alpha)
-
-        # solar incidence angle
+        # get solar direction vectors and solar incidence angle
         sun_el = np.radians(float(d["sun_elevation"]))
         sun_az = np.radians(float(d["sun_azimuth"]))
         sun_d = np.array([np.sin(sun_az) * np.cos(sun_el), np.cos(sun_az) * np.cos(sun_el), np.sin(sun_el)])
@@ -138,59 +142,33 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
         u1 = sun_d / np.linalg.norm(sun_d)
         u2 = surface_normal / np.linalg.norm(surface_normal)
         solar_dir_vectors.append(sun_d)
-        solar_incidence_angles.append(np.arccos(np.dot(u1, u2)))
-
-        date_str = d["acquisition_date"]
-        dt_obj = datetime.strptime(date_str, '%Y%m%d%H%M%S')
-        date_nb = int(dt_obj.month)*10000 + int(dt_obj.day)*100 + int(dt_obj.hour)
-        dates.append(date_nb)
-
-    # uncomment lines below to save all images sorted in chronological order or in order of solar incidence
-    """
-    json_paths_ordered = np.array(json_paths)[np.argsort(dates)].tolist()
-    for p, i in zip(json_paths_ordered, np.sort(dates)):
-        out_p = os.path.join(output_dir, "sorted_by_date/{:06}_{}".format(i, os.path.basename(p).replace(".json", ".tif")))
-        os.makedirs(os.path.dirname(out_p), exist_ok=True)
-        shutil.copy(os.path.join(args["img_dir"], os.path.basename(p).replace(".json", ".tif")), out_p)
-    json_paths_ordered = np.array(json_paths)[np.argsort(solar_incidence_angles)].tolist()
-    for p, i in zip(json_paths_ordered, np.sort(solar_incidence_angles)):
-        out_p = os.path.join(output_dir, "sorted_by_sun/{:.2f}_{}".format(i, os.path.basename(p).replace(".json", ".tif")))
-        os.makedirs(os.path.dirname(out_p), exist_ok=True)
-        shutil.copy(os.path.join(args["img_dir"], os.path.basename(p).replace(".json", ".tif")), out_p)
-    ie += 1
-    """
+        solar_incidence_angles.append(np.degrees(np.arccos(np.dot(u1, u2))))
 
     # take image closest to nadir as reference view
-    reference_image = json_paths[np.argmin(incidence_angles)]
+    reference_image = sat_utils.sort_by_increasing_view_incidence_angle(args.root_dir)[0]
     # define solar direction bounds
     upper_sun_dir = solar_dir_vectors[np.argmin(solar_incidence_angles)] # sun is close to nadir
     lower_sun_dir = solar_dir_vectors[np.argmax(solar_incidence_angles)] # sun is very tilted
 
-    # define a sat-nerf dataset of one single image using the reference view
-    dataset = SatelliteDataset(args["root_dir"], args["img_dir"], split="val",
-                               img_downscale=args["img_downscale"], cache_dir=args["cache_dir"])
+    # prepare a sat-nerf validation dataset of one single image using the reference view
+    dataset = SatelliteDataset(args.root_dir, args.img_dir, split="val",
+                               img_downscale=args.img_downscale, cache_dir=args.cache_dir)
     dataset.json_files = [reference_image]
 
-    # load nerf
-    if checkpoints_dir is None:
-        checkpoints_dir = args["checkpoints_dir"]
-    models, conf = load_nerf(run_id, log_path, checkpoints_dir, epoch_number-1, args)
-
-    # select ts if s-nerf-w
-    if conf.name == "s-nerf-w":
-        d_train = SatelliteDataset(args["root_dir"], args["img_dir"], split="train",
-                                   img_downscale=args["img_downscale"], cache_dir=args["cache_dir"])
+    # define transient embeddings if model is sat-nerf
+    if args.model == "sat-nerf":
+        d_train = SatelliteDataset(args.root_dir, args.img_dir, split="train",
+                                   img_downscale=args.img_downscale, cache_dir=args.cache_dir)
         if reference_image in d_train.json_files:
             t = d_train.json_files.index(reference_image)
-            rays = dataset[0]["rays"]
-            ts = t * torch.ones(rays.shape[0], 1).long().cuda().squeeze()
+            ts = t * torch.ones(dataset[0]["rays"].shape[0], 1).long().cuda().squeeze()
         else:
-            rays, rgbs = dataset[0]["rays"], dataset[0]["rgbs"]
-            if t is None:
-                train_indices = torch.unique(d_train.all_ids)
-                ts = find_best_embbeding_for_val_image(models, rays.cuda(), conf, rgbs, train_indices=train_indices)
+            t = predefined_val_ts(dataset[0]["src_id"][0])
+            ts = t * torch.ones(dataset[0]["rays"].shape[0], 1).long().cuda().squeeze()
     else:
         ts = None
+
+    out_dir = os.path.join(output_dir, "sun_interp", run_id)
 
     # run nerf for a range of vectors interpolated between solar direction bounds
     n_interp = 10
@@ -208,7 +186,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
         rays = sample["rays"]
         sun_dirs = torch.from_numpy(np.tile(sun_d, (rays.shape[0], 1)))
         rays[:, 8:11] = sun_dirs.type(torch.FloatTensor)
-        results = batched_inference(models, rays.cuda(), ts, conf)
+        results = batched_inference(models, rays.cuda(), ts, args)
 
         # save results
         for k in sample.keys():
@@ -216,7 +194,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
                 sample[k] = sample[k].unsqueeze(0)
             else:
                 sample[k] = [sample[k]]
-        out_dir = os.path.join(output_dir, "sun_interp", run_id)
+
         os.makedirs(out_dir, exist_ok=True)
         save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number)
         output_im_paths = glob.glob(os.path.join(out_dir, "*/*epoch{}.tif".format(epoch_number)))
@@ -224,29 +202,34 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None)
             shutil.move(p, p.replace(".tif", "_solar_incidence_angle_{:.2f}deg.tif".format(solar_incidence_angle)))
         print("solar incidence angle {:.2f} completed ({} of {})".format(solar_incidence_angle, i+1, n_interp))
 
+    crop_summary_images = not crops
+
     # write summary images
     summary_dir = os.path.join(out_dir, "summary")
     os.makedirs(summary_dir, exist_ok=True)
     # sun
     img_paths = sorted(glob.glob(os.path.join(out_dir, "sun/*.tif")))
-    out_img = Image.fromarray(hstack_sun_tifs(img_paths))
+    out_img = Image.fromarray(hstack_sun_tifs(img_paths, crop=crop_summary_images))
     out_img.save(os.path.join(summary_dir, "sun.png"))
     # albedo
     img_paths = sorted(glob.glob(os.path.join(out_dir, "albedo/*.tif")))
-    out_img = Image.fromarray(hstack_rgb_tifs(img_paths))
+    out_img = Image.fromarray(hstack_rgb_tifs(img_paths, crop=crop_summary_images))
     out_img.save(os.path.join(summary_dir, "albedo.png"))
     # rgbs
     img_paths = sorted(glob.glob(os.path.join(out_dir, "rgb/*.tif")))
-    out_img = Image.fromarray(hstack_rgb_tifs(img_paths))
+    out_img = Image.fromarray(hstack_rgb_tifs(img_paths, crop=crop_summary_images))
     out_img.save(os.path.join(summary_dir, "rgb.png"))
     # depth v1
     img_paths = sorted(glob.glob(os.path.join(out_dir, "depth/*.tif")))
-    out_img = Image.fromarray(hstack_dsm_tifs_v1(img_paths))
+    out_img = Image.fromarray(hstack_dsm_tifs_v1(img_paths, crop=crop_summary_images))
     out_img.save(os.path.join(summary_dir, "depth_v1.png"))
     # depth v2
-    img_paths = sorted(glob.glob(os.path.join(out_dir, "depth/*.tif")))
-    out_img = Image.fromarray(hstack_dsm_tifs_v2(img_paths))
-    out_img.save(os.path.join(summary_dir, "depth_v2.png"))
+    try:
+        img_paths = sorted(glob.glob(os.path.join(out_dir, "depth/*.tif")))
+        out_img = Image.fromarray(hstack_dsm_tifs_v2(img_paths, crop=crop_summary_images))
+        out_img.save(os.path.join(summary_dir, "depth_v2.png"))
+    except:
+        print("warning: dmtk shading failed")
 
 if __name__ == '__main__':
     import fire

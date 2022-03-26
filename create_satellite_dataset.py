@@ -6,7 +6,7 @@ import srtm4
 import shutil
 import sys
 import json
-from datasets.satellite import get_file_id
+from sat_utils import get_file_id
 import rasterio
 
 
@@ -242,6 +242,8 @@ def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, crop_aoi=True
             f.write("\n".join(train_samples))
         with open(os.path.join(output_dir, "test.txt"), "w+") as f:
             f.write("\n".join(test_samples))
+
+    print("done")
 
 if __name__ == '__main__':
     import fire

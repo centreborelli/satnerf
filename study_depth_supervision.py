@@ -1,11 +1,14 @@
 import matplotlib.pyplot as plt
 import numpy as np
-from datasets import satellite
-from opt import get_opts
+from datasets.satellite_depth import SatelliteDataset_depth
+from datasets.satellite import get_rays
+import sat_utils
 import rpcm
 import json
 import torch
 import os
+import shutil
+import argparse
 
 def save_heatmap_of_reprojection_error(height, width, pts2d, track_err, smooth=20, plot=False):
     """
@@ -53,7 +56,6 @@ def save_heatmap_of_reprojection_error(height, width, pts2d, track_err, smooth=2
         return track_err_interp
 
 
-
 def idw_interpolation(pts2d, z, pts2d_query, N=8):
     """
     Interpolates each query point pts2d_query from the N nearest known data points in pts2d
@@ -97,38 +99,43 @@ def idw_interpolation(pts2d, z, pts2d_query, N=8):
 
 def check_depth_supervision_points(run_id, logs_dir, output_dir):
 
-    log_path = os.path.join(logs_dir, run_id)
-    with open('{}/opts.json'.format(log_path), 'r') as f:
-        args = json.load(f)
+    with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
+        args = argparse.Namespace(**json.load(f))
 
-    sat_dataset = satellite.SatelliteDataset(root_dir=args["root_dir"],
-                                             img_dir=args["img_dir"] if args["img_dir"] is not None else args["root_dir"],
+    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+
+    sat_dataset = SatelliteDataset_depth(root_dir=args.root_dir,
+                                             img_dir=args.img_dir,
                                              split="train",
-                                             cache_dir=args["cache_dir"],
-                                             img_downscale=args["img_downscale"],
-                                             depth=True)
+                                             cache_dir=args.cache_dir,
+                                             img_downscale=args.img_downscale)
 
     json_files = sat_dataset.json_files
     tie_points = sat_dataset.tie_points
     kp_weights = sat_dataset.load_keypoint_weights_for_depth_supervision(json_files, tie_points)
 
+    output_dir = os.path.join(output_dir, "depth_supervision", run_id)
+    print("Output dir:", output_dir)
     for t, json_p in enumerate(json_files):
         # read json
         with open(json_p) as f:
             d = json.load(f)
-        img_id = satellite.get_file_id(d["img"])
+        img_id = sat_utils.get_file_id(d["img"])
 
         if "keypoints" not in d.keys():
             raise ValueError("No 'keypoints' field was found in {}".format(json_p))
 
         pts2d = np.array(d["keypoints"]["2d_coordinates"]) / sat_dataset.img_downscale
         pts3d = np.array(tie_points[d["keypoints"]["pts3d_indices"], :])
-        rpc = satellite.rescale_RPC(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / sat_dataset.img_downscale)
+        rpc = sat_utils.rescale_rpc(rpcm.RPCModel(d["rpc"], dict_format="rpcm"), 1.0 / sat_dataset.img_downscale)
 
         # build the sparse batch of rays for depth supervision
         cols, rows = pts2d.T
         min_alt, max_alt = float(d["min_alt"]), float(d["max_alt"])
-        rays = sat_dataset.get_rays(cols, rows, rpc, min_alt, max_alt)
+        rays = get_rays(cols, rows, rpc, min_alt, max_alt)
         rays = sat_dataset.normalize_rays(rays)
 
         # normalize the 3d coordinates of the tie points observed in the current view
@@ -145,7 +152,6 @@ def check_depth_supervision_points(run_id, logs_dir, output_dir):
 
         # retrieve weights
         current_weights = torch.from_numpy(kp_weights[d["keypoints"]["pts3d_indices"]]).type(torch.FloatTensor)
-        current_weights = current_weights
 
         # interpolate initial depths given by the known 3d points
         h, w = int(d["height"] // sat_dataset.img_downscale), int(d["width"] // sat_dataset.img_downscale)
@@ -153,29 +159,30 @@ def check_depth_supervision_points(run_id, logs_dir, output_dir):
 
         # construct dsm from interpolated initial depths
         init_depth = torch.from_numpy(interpolated_init_depth).type(torch.FloatTensor)
-        cols, rows = np.meshgrid(np.arange(h), np.arange(w))
-        rays = sat_dataset.get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
+        cols, rows = np.meshgrid(np.arange(w), np.arange(h))
+        rays = get_rays(cols.flatten(), rows.flatten(), rpc, min_alt, max_alt)
         rays = sat_dataset.normalize_rays(rays)
-        output_path = os.path.join(output_dir, "{}/init_dsm_depth_supervision_{}.tif".format(run_id, img_id))
+
+        output_path = os.path.join(output_dir, "init_dsm_depth_supervision_{}.tif".format(img_id))
         sat_dataset.get_dsm_from_nerf_prediction(rays, init_depth.reshape((-1,1)), dsm_path=output_path)
 
         # crop within gt area of interest
         from osgeo import gdal
         aoi_id = img_id[:7]
-        dsm_metadata = np.loadtxt(os.path.join(args["gt_dir"], aoi_id + "_DSM.txt"))
+        dsm_metadata = np.loadtxt(os.path.join(args.gt_dir, aoi_id + "_DSM.txt"))
         xoff, yoff = dsm_metadata[0], dsm_metadata[1]
         xsize, ysize = int(dsm_metadata[2]), int(dsm_metadata[2])
         resolution = dsm_metadata[3]
         ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
         ds = gdal.Open(output_path)
-        crop_dsm_path = os.path.join(output_dir, "{}/init_dsm_depth_supervision_{}_crop.tif".format(run_id, img_id))
+        crop_dsm_path = os.path.join(output_dir, "init_dsm_depth_supervision_{}_tmp.tif".format(img_id))
         ds = gdal.Translate(crop_dsm_path, ds, projWin=[ulx, uly, lrx, lry])
         ds = None
+        os.remove(output_path)
+        shutil.copyfile(crop_dsm_path, output_path)
+        os.remove(crop_dsm_path)
 
-        print("Output file:", output_path)
-        break
-
-    print("done")
+        print("done {} of {}".format(t+1, len(json_files)))
 
 if __name__ == '__main__':
     import fire

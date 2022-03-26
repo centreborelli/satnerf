@@ -29,14 +29,14 @@ If you find this code or work helpful, please cite:
 - `s2p` is used to additionally evaluate a satellite MVS pipeline relying on classic computer vision methods.
 - `ba` is used to bundle adjust the RPCs of the DFC2019 data. 
 
-To create the conda environments you can use:
+To create the conda environments you can use the setup scripts, e.g.
 ```
-conda init && bash -i create_conda_env.sh
+conda init && bash -i setup_satnerf_env.sh
 ```
 
 2. It is recommended to install `dsmr`. Otherwise the code will not crash but DSM registration will lose accuracy and affect the estimated altitude MAE.
 
-Warning: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code. E.g:
+Warning: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code:
 ```
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
 ```
@@ -50,7 +50,7 @@ You can download [here](https://drive.google.com/drive/folders/1l0Jx0-MrvmDd8WBp
 
 Example command:
 ```shell
-(satnerf) $ python3 eval_satnerf.py 2022-03-24_22-50-35_JAX_068_ds1_sat-nerf /mnt/cdisk/roger/SatNeRF_output/logs /mnt/cdisk/roger/SatNeRF_output/results 24 val
+(satnerf) $ python3 eval_satnerf.py 2022-03-24_22-50-35_JAX_068_ds1_sat-nerf /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results 24 val
 ```
 ---
 
@@ -73,12 +73,12 @@ The `create_satellite_dataset.py` script can be used to generate input datasets 
 
 We encourage you to use the `bundle_adjust` package, available [here](https://github.com/centreborelli/sat-bundleadjust), to ensure your dataset employs highly accurate RPC camera models. This will also allow aggregating depth supervision to the training and consequently boost the performance of the NeRF model.
 ```shell
-(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068_ba
+(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/SatNeRF_/root_dir/crops_rpcs_ba/JAX_068
 ```
 
 Alternatively, if you prefer not installing `bundle_adjust`, it is also possible to use the flag `--noba` to create the dataset using the original RPC camera models from the DFC2019 data.
 ```shell
-(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/nerf_satellite/JAX_068 --noba
+(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/SatNeRF_/root_dir/crops_rpcs_raw/JAX_068 --noba
 ```
 
 ### 4.2. Depth supervision:
@@ -87,7 +87,7 @@ The script `check_depth_supervision_points.py` produces an interpolated DSM with
 
 Example command:
 ```shell
-(satnerf) $ python3 check_depth_supervision_points.py 2021-11-03_08-00-59_depthx2_newpoints /mnt/cdisk/roger/nerf_output/logs /mnt/cdisk/roger/nerf_output/results
+(satnerf) $ python3 study_depth_supervision.py 2022-03-25_12-59-21_JAX_068_ds1_sat-nerf_SCx0.1 /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results
 ```
 
 
@@ -97,7 +97,7 @@ The script `eval_sun_interp.py` can be used to visualize images of the same AOI 
 
 Example command:
 ```shell
-(satnerf) $ python3 eval_sun_interp.py 2022-03-25_12-59-21_JAX_068_ds1_sat-nerf_SCx0.1 /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results 24
+(satnerf) $ python3 study_solar_correction.py 2022-03-25_12-59-21_JAX_068_ds1_sat-nerf_SCx0.1 /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results 24
 ```
 
 
@@ -106,5 +106,5 @@ We compare the DSMs learned by SatNeRF with the equivalent DSMs obtained from ma
 More details of the classic satellite MVS reconstruction process can be found [here](https://openaccess.thecvf.com/content_cvpr_2017_workshops/w18/html/Facciolo_Automatic_3D_Reconstruction_CVPR_2017_paper.html).
 Use the script `eval_s2p.py` to reconstruct an AOI using this methodology.
 ```shell
-(s2p) $ python3 eval_s2p.py JAX_068 /mnt/cdisk/roger/Datasets/SatNeRF/root_dir/fullaoi_rpcs_ba_v1/JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 --n_pairs 10
+(s2p) $ python3 eval_s2p.py JAX_068 /mnt/cdisk/roger/Datasets/SatNeRF/root_dir/fullaoi_rpcs_ba_v1/JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/nerf_output-crops3/results --n_pairs 10
 ```

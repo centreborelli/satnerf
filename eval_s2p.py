@@ -225,18 +225,19 @@ def project_cloud_into_utm_grid(xyz, bb, definition, mode, mask=None):
     
     return raw_map_np
 
-def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", n_pairs=1, resolution=0.5, crops=False):
+def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir=".", n_pairs=1, resolution=0.5, crops=False):
+
+    out_dir = os.path.join(output_dir, "s2p_dsms", aoi_id)
+    print("Output dir:", out_dir)
+    if os.path.exists(out_dir):
+        shutil.rmtree(out_dir)
 
     if crops:
         print("using crops")
         img_dir = os.path.join(dfc_dir, "Track3-RGB-crops/{}".format(aoi_id))
-        output_dir += "_crops"
+        out_dir += "_crops"
     else:
         img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
-
-    out_dir = os.path.join(output_dir, aoi_id)
-    if os.path.exists(out_dir):
-        shutil.rmtree(out_dir)
 
     heuristic = True
     heuristic_pairs_file = os.path.join(dfc_dir, "DFC2019_JAX_heuristic_pairs.txt")
@@ -269,9 +270,8 @@ def eval_s2p(aoi_id, root_dir, dfc_dir, output_dir="s2p_dsms", n_pairs=1, resolu
         f.write(raster[:, :, 0], 1)
     # evaluate s2p generated mvs DSM
     gt_dir = os.path.join(dfc_dir, "Track3-Truth")
-    out_dir = os.path.join(output_dir, aoi_id)
-    mae = compute_mae_and_save_dsm_diff(mvs_dsm_path, aoi_id, gt_dir, out_dir, "_")
-    rmvs_dsm_path = os.path.join(out_dir, f"{aoi_id}_rdsm_epoch_.tif")
+    mae = compute_mae_and_save_dsm_diff(mvs_dsm_path, aoi_id, gt_dir, out_dir, "")
+    rmvs_dsm_path = os.path.join(out_dir, f"{aoi_id}_rdsm_epoch.tif")
     shutil.copyfile(rmvs_dsm_path, rmvs_dsm_path.replace(".tif", "_{:.3f}.tif".format(mae)))
     with rasterio.open(rmvs_dsm_path, "r") as f:
         avg_dsm = f.read(1)

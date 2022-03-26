@@ -168,7 +168,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None,
     else:
         ts = None
 
-    out_dir = os.path.join(output_dir, "sun_interp", run_id)
+    out_dir = os.path.join(output_dir, "solar_correction", run_id)
 
     # run nerf for a range of vectors interpolated between solar direction bounds
     n_interp = 10

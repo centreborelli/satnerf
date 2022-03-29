@@ -75,7 +75,7 @@ class SatNerfLoss(torch.nn.Module):
 class DepthLoss(torch.nn.Module):
     def __init__(self, lambda_ds=1.0):
         super().__init__()
-        self.lambda_ds = lambda_ds
+        self.lambda_ds = lambda_ds/3.
         self.loss = torch.nn.MSELoss(reduce=False)
 
     def forward(self, inputs, targets, weights=1.):

@@ -1,5 +1,5 @@
 @article{mari2022sat,
-  title={Sat-NeRF: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using RPC Cameras},
+  title={{Sat-NeRF}: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using {RPC} Cameras},
   author={Mar{\'\i}, Roger and Facciolo, Gabriele and Ehret, Thibaud},
   journal={arXiv preprint arXiv:2203.08896},
   year={2022}

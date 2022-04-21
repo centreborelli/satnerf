@@ -1,6 +1,8 @@
-# SatNeRF
+# Sat-NeRF
 
-Developed by the [Centre Borelli](https://www.centreborelli.fr/), ENS Paris-Saclay (2021).
+### [[Project page]](https://centreborelli.github.io/satnerf)
+
+Developed at the [ENS Paris-Saclay, Centre Borelli](https://www.centreborelli.fr/) and accepted at the [CVPR EarthVision Workshop 2022](https://www.grss-ieee.org/events/earthvision-2022/).
 
 ### [Sat-NeRF: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using RPC Cameras](https://arxiv.org/abs/2203.08896)
 *[Roger Marí](https://scholar.google.com/citations?user=TgpSmIsAAAAJ&hl=en), 
@@ -11,7 +13,7 @@ Developed by the [Centre Borelli](https://www.centreborelli.fr/), ENS Paris-Sacl
 
 If you find this code or work helpful, please cite:
 ```
-@article{mari2022satnerf,
+@article{mari2022sat,
   title={{Sat-NeRF}: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using {RPC} Cameras},
   author={Mar{\'\i}, Roger and Facciolo, Gabriele and Ehret, Thibaud},
   journal={arXiv preprint arXiv:2203.08896},

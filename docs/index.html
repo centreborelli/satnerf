@@ -118,10 +118,10 @@
 
 <html>
 <head>
-	<title>This is my paper title</title>
-	<meta property="og:image" content="Path to my teaser.png"/> <!-- Facebook automatically scrapes this. Go to https://developers.facebook.com/tools/debug/ if you update and want to force Facebook to rescrape. -->
-	<meta property="og:title" content="Creative and Descriptive Paper Title." />
-	<meta property="og:description" content="Paper description." />
+	<title>Sat-NeRF</title>
+	<meta property="og:image" content="./teaser.png"/> <!-- Facebook automatically scrapes this. Go to https://developers.facebook.com/tools/debug/ if you update and want to force Facebook to rescrape. -->
+	<meta property="og:title" content="Sat-NeRF" />
+	<meta property="og:description" content="CVPR EarthVision 2022 Sat-NeRF" />
 
 	<!-- Get from Google Analytics -->
 	<!-- Global site tag (gtag.js) - Google Analytics -->
@@ -138,44 +138,52 @@
 <body>
 	<br>
 	<center>
-		<span style="font-size:36px">Creative and Descriptive Paper Title</span>
+		<span style="font-size:36px">Sat-NeRF</span>
+        <br>
+        <span style="font-size:24px">&nbsp;Learning Multi-View Satellite Photogrammetry<br>With Transient Objects and Shadow Modeling Using RPC Cameras</span>
+        <br><br>
 		<table align=center width=600px>
 			<table align=center width=600px>
 				<tr>
 					<td align=center width=100px>
 						<center>
-							<span style="font-size:24px"><a href="https://en.wikipedia.org/wiki/James_J._Gibson">First Author</a></span>
+							<span style="font-size:24px"><a href="https://scholar.google.com/citations?user=TgpSmIsAAAAJ&hl=en">Roger Mar&iacute;</a></span>
 						</center>
 					</td>
 					<td align=center width=100px>
 						<center>
-							<span style="font-size:24px"><a href="https://en.wikipedia.org/wiki/James_J._Gibson">Second Author</a></span>
+							<span style="font-size:24px"><a href="http://gfacciol.github.io">Gabriele Facciolo</a></span>
 						</center>
 					</td>
 					<td align=center width=100px>
 						<center>
-							<span style="font-size:24px"><a href="https://en.wikipedia.org/wiki/James_J._Gibson">Third Author</a></span>
+							<span style="font-size:24px"><a href="https://tehret.github.io/">Thibaud Ehret</a></span>
 						</center>
 					</td>
 				</tr>
 			</table>
-			<table align=center width=250px>
+			<table align=center width=375px>
 				<tr>
 					<td align=center width=120px>
 						<center>
-							<span style="font-size:24px"><a href=''>[Paper]</a></span>
+							<span style="font-size:24px"><a href='https://arxiv.org/abs/2203.08896'>[Paper]</a></span>
 						</center>
 					</td>
 					<td align=center width=120px>
 						<center>
-							<span style="font-size:24px"><a href='https://github.com/richzhang/webpage-template'>[GitHub]</a></span><br>
+							<span style="font-size:24px"><a href='https://github.com/centreborelli/satnerf'>[GitHub]</a></span><br>
+						</center>
+					</td>
+                    <td align=center width=120px>
+						<center>
+							<span style="font-size:24px"><a href='./bibtex.txt'>[Bibtex]</a></span><br>
 						</center>
 					</td>
 				</tr>
 			</table>
 		</table>
 	</center>
-
+    <br>
 	<center>
 		<table align=center width=850px>
 			<tr>
@@ -186,59 +194,38 @@
 				</td>
 			</tr>
 		</table>
-		<table align=center width=850px>
+	</center>
+    <br>
+	<table align=center width=850px>
+		<center>
 			<tr>
-				<td>
-					This was a template originally made for <a href="http://richzhang.github.io/colorization/">Colorful Image Colorization</a>. The code can be found in this <a href="https://github.com/richzhang/webpage-template">repository</a>.
+				<td align=center>
+                    Project developed at the <a href='https://centreborelli.ens-paris-saclay.fr/fr'>ENS Paris-Saclay, Centre Borelli</a> and accepted at the <a href='https://www.grss-ieee.org/events/earthvision-2022/'>CVPR EarthVision Workshop 2022</a>.<br>
 				</td>
 			</tr>
-		</table>
-	</center>
+		</center>
+	</table>
 
 	<hr>
 
 	<table align=center width=850px>
 		<center><h1>Abstract</h1></center>
 		<tr>
-			<td>
-				This is my abstract.
+			<td align=justify>
+                We introduce the Satellite Neural Radiance Field (Sat-NeRF), a new end-to-end model for learning multi-view satellite photogrammetry in the wild. Sat-NeRF combines some of the latest trends in neural rendering with native satellite camera models, represented by rational polynomial coefficient (RPC) functions. The proposed method renders new views and infers surface models of similar quality to those obtained with traditional state-of-the-art stereo pipelines. Multi-date images exhibit significant changes in appearance, mainly due to varying shadows and transient objects (cars, vegetation). Robustness to these challenges is achieved by a shadow-aware irradiance model and uncertainty weighting to deal with transient phenomena that cannot be explained by the position of the sun. We evaluate Sat-NeRF using WorldView-3 images from different locations and stress the advantages of applying a bundle adjustment to the satellite camera models prior to training. This boosts the network performance and can optionally be used to extract additional cues for depth supervision.
 			</td>
 		</tr>
 	</table>
 	<br>
 
 	<hr>
-	<center><h1>Talk</h1></center>
-	<p align="center">
-		<iframe width="660" height="395" src="https://www.youtube.com/embed/dQw4w9WgXcQ" frameborder="0" allow="autoplay; encrypted-media" allowfullscreen align="center"></iframe>
-	</p>
 
-	<table align=center width=800px>
-		<br>
-		<tr>
-			<center>
-				<span style="font-size:28px"><a href=''>[Slides]</a>
-				</span>
-			</center>
-		</tr>
-	</table>
-	<hr>
-
-	<center><h1>Code</h1></center>
-
-	<table align=center width=420px>
-		<center>
-			<tr>
-				<td>
-				</td>
-			</tr>
-		</center>
-	</table>
+	<center><h1>Method Diagram</h1></center>
 	<table align=center width=400px>
 		<tr>
 			<td align=center width=400px>
 				<center>
-					<td><img class="round" style="width:450px" src="./method_diagram.png"/></td>
+					<img width="600" src="./method_diagram.png"/>
 				</center>
 			</td>
 		</tr>
@@ -246,29 +233,30 @@
 	<table align=center width=850px>
 		<center>
 			<tr>
-				<td>
-					Short description if wanted
+				<td align=justify>
+                    <strong>Sat-NeRF network architecture.</strong> The geometry (<i>volume density</i>) and appearance (<i>albedo color</i>) of permanent structures are simultaneously learned using a main backbone of fully-connected layers. Shadows (<i>shading scalar</i>), hue biases (<i>ambient color</i>) and transient objects (<i>uncertainty coefficient</i>) are learned by secondary heads.
 				</td>
 			</tr>
 		</center>
 	</table>
 	<table align=center width=800px>
 		<br>
-		<tr><center>
-			<span style="font-size:28px">&nbsp;<a href='https://github.com/richzhang/webpage-template'>[GitHub]</a>
-			</center>
-		</span>
+		<tr>
+            <center>
+                <span style="font-size:28px">&nbsp;<a href='https://github.com/centreborelli/satnerf'>[GitHub]</a></span>
+            </center>
+        </tr>
 	</table>
 	<br>
 	<hr>
 	<table align=center width=450px>
-		<center><h1>Paper and Supplementary Material</h1></center>
+		<center><h1>Paper</h1></center>
 		<tr>
 			<td><a href=""><img class="layered-paper-big" style="height:175px" src="./paper.png"/></a></td>
-			<td><span style="font-size:14pt">F. Author, S. Author, T. Author.<br>
-				<b>Creative and Descriptive Paper Title.</b><br>
-				In Conference, 20XX.<br>
-				(hosted on <a href="">ArXiv</a>)<br>
+			<td><span style="font-size:14pt">R. Mar&iacute;, G. Facciolo, T. Ehret.<br>
+				<b>Sat-NeRF: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using RPC Cameras.</b><br>
+				In CVPR Workshops, 2022.<br>
+				(hosted on <a href="https://arxiv.org/abs/2203.08896">ArXiv</a>)<br>
 				<!-- (<a href="./resources/camera-ready.pdf">camera ready</a>)<br> -->
 				<span style="font-size:4pt"><a href=""><br></a>
 				</span>

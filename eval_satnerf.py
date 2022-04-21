@@ -80,15 +80,15 @@ def load_nerf(run_id, logs_dir, ckpts_dir, epoch_number):
     models = {}
     nerf_coarse = load_model(args)
     load_ckpt(nerf_coarse, checkpoint_path, model_name='nerf_coarse')
-    models["coarse"] = nerf_coarse.cuda('cuda:0').eval()
+    models["coarse"] = nerf_coarse.cuda().eval()
     if args.n_importance > 0:
         nerf_fine = load_model(args)
         load_ckpt(nerf_coarse, checkpoint_path, model_name='nerf_fine')
-        models['fine'] = nerf_fine.cuda('cuda:0').eval()
+        models['fine'] = nerf_fine.cuda().eval()
     if args.model == "sat-nerf":
         embedding_t = torch.nn.Embedding(args.t_embbeding_vocab, args.t_embbeding_tau)
         load_ckpt(embedding_t, checkpoint_path, model_name='embedding_t')
-        models["t"] = embedding_t.cuda('cuda:0').cuda()
+        models["t"] = embedding_t.cuda().eval()
 
     return models
 

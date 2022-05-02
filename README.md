@@ -44,7 +44,7 @@ export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
 ```
 where `$CONDA_PREFIX` is the path to your conda or miniconda environment (e.g. `/mnt/cdisk/roger/miniconda3/envs/satnerf`).
 
-You can download [here](https://drive.google.com/drive/folders/1l0Jx0-MrvmDd8WBpGcxDo8_KWLpKfGhK?usp=sharing) the training and test datasets, as well as some pretrained models.
+You can download [here](https://github.com/centreborelli/satnerf/releases/tag/EarthVision2022) the training and test datasets, as well as some pretrained models.
 
 ---
 

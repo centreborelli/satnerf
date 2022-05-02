@@ -259,3 +259,13 @@ def sort_by_acquisition_date(root_dir):
         date_str = d["acquisition_date"]
         acquisition_dates.append(datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S'))
     return [x for _, x in sorted(zip(acquisition_dates, json_paths))]
+
+def sort_by_day_of_the_year(root_dir):
+    acquisition_dates = []
+    json_paths = glob.glob(os.path.join(root_dir, "*.json"))
+    for json_p in json_paths:
+        with open(json_p) as f:
+            d = json.load(f)
+        date_str = d["acquisition_date"]
+        acquisition_dates.append(datetime.datetime.strptime(date_str, '%Y%m%d%H%M%S'))
+    return [x for _, x in sorted(zip(acquisition_dates, json_paths), key=lambda x: x[0].timetuple().tm_yday)]

@@ -18,3 +18,4 @@ utm
 chardet
 opencv-contrib-python
 jupyter
+numba

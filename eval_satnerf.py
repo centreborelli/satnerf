@@ -210,15 +210,27 @@ def predefined_val_ts(img_id):
 
 
 
-def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=None):
+def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=None, root_dir=None, img_dir=None, gt_dir=None):
 
     with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
         args = argparse.Namespace(**json.load(f))
 
-    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
-    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
-    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
-    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+    #args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    #args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    #args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    #args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+
+    if gt_dir is not None:
+        assert os.path.isdir(gt_dir)
+        args.gt_dir = gt_dir
+    if img_dir is not None:
+        assert os.path.isdir(img_dir)
+        args.img_dir = img_dir
+    if root_dir is not None:
+        assert os.path.isdir(root_dir)
+        args.root_dir = root_dir
+    if not os.path.isdir(args.cache_dir):
+        args.cache_dir = None
 
     # load pretrained nerf
     if checkpoints_dir is None:

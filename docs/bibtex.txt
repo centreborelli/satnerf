@@ -1,6 +1,7 @@
-@article{mari2022sat,
+@inproceedings{mari2022sat,
   title={{Sat-NeRF}: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using {RPC} Cameras},
   author={Mar{\'\i}, Roger and Facciolo, Gabriele and Ehret, Thibaud},
-  journal={arXiv preprint arXiv:2203.08896},
+  booktitle={2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)},
+  pages={1310-1320},
   year={2022}
 }

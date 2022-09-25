@@ -4,7 +4,7 @@
 
 Developed at the [ENS Paris-Saclay, Centre Borelli](https://www.centreborelli.fr/) and accepted at the [CVPR EarthVision Workshop 2022](https://www.grss-ieee.org/events/earthvision-2022/).
 
-### [Sat-NeRF: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using RPC Cameras](https://arxiv.org/abs/2203.08896)
+### [Sat-NeRF: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using RPC Cameras](https://openaccess.thecvf.com/content/CVPR2022W/EarthVision/papers/Mari_Sat-NeRF_Learning_Multi-View_Satellite_Photogrammetry_With_Transient_Objects_and_Shadow_CVPRW_2022_paper.pdf)
 *[Roger Marí](https://scholar.google.com/citations?user=TgpSmIsAAAAJ&hl=en), 
 [Gabriele Facciolo](http://dev.ipol.im/~facciolo/),
 [Thibaud Ehret](https://tehret.github.io/)*
@@ -13,10 +13,11 @@ Developed at the [ENS Paris-Saclay, Centre Borelli](https://www.centreborelli.fr
 
 If you find this code or work helpful, please cite:
 ```
-@article{mari2022sat,
+@inproceedings{mari2022sat,
   title={{Sat-NeRF}: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using {RPC} Cameras},
   author={Mar{\'\i}, Roger and Facciolo, Gabriele and Ehret, Thibaud},
-  journal={arXiv preprint arXiv:2203.08896},
+  booktitle={2022 IEEE/CVF Conference on Computer Vision and Pattern Recognition Workshops (CVPRW)},
+  pages={1310-1320},
   year={2022}
 }
 ```

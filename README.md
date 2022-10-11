@@ -37,8 +37,6 @@ To create the conda environments you can use the setup scripts, e.g.
 conda init && bash -i setup_satnerf_env.sh
 ```
 
-2. It is recommended to install `dsmr`. Otherwise the code will not crash but DSM registration will lose accuracy and affect the estimated altitude MAE.
-
 Warning: If some libraries are not found, it may be necessary to update the environment variable `LD_LIBRARY_PATH` before launching the code:
 ```
 export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:$CONDA_PREFIX/lib
@@ -53,7 +51,9 @@ You can download [here](https://github.com/centreborelli/satnerf/releases/tag/Ea
 
 Example command:
 ```shell
-(satnerf) $ python3 eval_satnerf.py 2022-03-24_22-50-35_JAX_068_ds1_sat-nerf /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results 24 val
+(satnerf) $ export dataset_dir=/mnt/cdisk/roger/EV2022_satnerf/dataset
+(satnerf) $ export pretrained_models=/mnt/cdisk/roger/EV2022_satnerf/pretrained_models
+(satnerf) $ python3 eval_satnerf.py Sat-NeRF $pretrained_models/JAX_068 output_dir 28 val $pretrained_models/JAX_068 $dataset_dir/root_dir/crops_rpcs_ba_v2/JAX_068 $dataset_dir/DFC2019/Track3-RGB-crops/JAX_068 $dataset_dir/DFC2019/Track3-Truth
 ```
 ---
 

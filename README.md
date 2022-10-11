@@ -49,11 +49,16 @@ You can download [here](https://github.com/centreborelli/satnerf/releases/tag/Ea
 
 ## 2. Testing
 
-Example command:
+Example command to generate a surface model with Sat-NeRF:
 ```shell
 (satnerf) $ export dataset_dir=/mnt/cdisk/roger/EV2022_satnerf/dataset
 (satnerf) $ export pretrained_models=/mnt/cdisk/roger/EV2022_satnerf/pretrained_models
-(satnerf) $ python3 eval_satnerf.py Sat-NeRF $pretrained_models/JAX_068 output_dir 28 val $pretrained_models/JAX_068 $dataset_dir/root_dir/crops_rpcs_ba_v2/JAX_068 $dataset_dir/DFC2019/Track3-RGB-crops/JAX_068 $dataset_dir/DFC2019/Track3-Truth
+(satnerf) $ python3 create_satnerf_dsm.py Sat-NeRF $pretrained_models/JAX_068 out_dsm_path/JAX_068 28 $pretrained_models/JAX_068 $dataset_dir/root_dir/crops_rpcs_ba_v2/JAX_068 $dataset_dir/DFC2019/Track3-RGB-crops/JAX_068 $dataset_dir/DFC2019/Track3-Truth
+```
+
+Example command for novel view synthesis with Sat-NeRF:
+```shell
+(satnerf) $ python3 eval_satnerf.py Sat-NeRF $pretrained_models/JAX_068 out_eval_path/JAX_068 28 val $pretrained_models/JAX_068 $dataset_dir/root_dir/crops_rpcs_ba_v2/JAX_068 $dataset_dir/DFC2019/Track3-RGB-crops/JAX_068 $dataset_dir/DFC2019/Track3-Truth
 ```
 ---
 
@@ -76,31 +81,32 @@ The `create_satellite_dataset.py` script can be used to generate input datasets 
 
 We encourage you to use the `bundle_adjust` package, available [here](https://github.com/centreborelli/sat-bundleadjust), to ensure your dataset employs highly accurate RPC camera models. This will also allow aggregating depth supervision to the training and consequently boost the performance of the NeRF model.
 ```shell
-(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/SatNeRF_/root_dir/crops_rpcs_ba/JAX_068
+(ba) $ python3 create_satellite_dataset.py JAX_068 $dataset_dir/DFC2019 out_dataset_path/JAX_068
 ```
 
 Alternatively, if you prefer not installing `bundle_adjust`, it is also possible to use the flag `--noba` to create the dataset using the original RPC camera models from the DFC2019 data.
 ```shell
-(ba) $ python3 create_satellite_dataset.py JAX_068 /mnt/cdisk/roger/Datasets/DFC2019 /mnt/cdisk/roger/Datasets/SatNeRF_/root_dir/crops_rpcs_raw/JAX_068 --noba
+(ba) $ python3 create_satellite_dataset.py JAX_068 $dataset_dir/DFC2019 out_dataset_path/JAX_068 --noba
 ```
+The `--splits` flag can also be used to generate the `train.txt` and `test.txt` files.
 
 ### 4.2. Depth supervision:
 
-The script `check_depth_supervision_points.py` produces an interpolated DSM with the initial depths given by the 3D keypoints output by `bundle_adjust`.
+The script `study_depth_supervision.py` produces an interpolated DSM with the initial depths given by the 3D keypoints output by `bundle_adjust`.
 
 Example command:
 ```shell
-(satnerf) $ python3 study_depth_supervision.py 2022-03-25_12-59-21_JAX_068_ds1_sat-nerf_SCx0.1 /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results
+(satnerf) $ python3 study_depth_supervision.py Sat-NeRF+DS $pretrained_models/JAX_068 out_DS_study_path/JAX_068 $dataset_dir/root_dir/crops_rpcs_ba_v2/JAX_068 $dataset_dir/DFC2019/Track3-RGB-crops $dataset_dir/DFC2019/Track3-Truth
 ```
 
 
 ### 4.3. Interpolate over different sun directions:
 
-The script `eval_sun_interp.py` can be used to visualize images of the same AOI rendered with different solar direction vectors.
+The script `study_solar_interpolation.py` can be used to visualize images of the same AOI rendered with different solar direction vectors.
 
 Example command:
 ```shell
-(satnerf) $ python3 study_solar_correction.py 2022-03-25_12-59-21_JAX_068_ds1_sat-nerf_SCx0.1 /mnt/cdisk/roger/nerf_output-crops3/logs /mnt/cdisk/roger/nerf_output-crops3/results 24
+(satnerf) $ python3 study_solar_interpolation.py Sat-NeRF $pretrained_models/JAX_068 out_solar_study_path/JAX_068 28 $pretrained_models/JAX_068 $dataset_dir/root_dir/crops_rpcs_ba_v2/JAX_068 $dataset_dir/DFC2019/Track3-RGB-crops/JAX_068 $dataset_dir/DFC2019/Track3-Truth
 ```
 
 

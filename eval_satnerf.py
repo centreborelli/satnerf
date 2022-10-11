@@ -212,6 +212,7 @@ def predefined_val_ts(img_id):
 
 def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=None, root_dir=None, img_dir=None, gt_dir=None):
 
+    print(logs_dir)
     with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
         args = argparse.Namespace(**json.load(f))
 
@@ -278,7 +279,7 @@ def eval_aoi(run_id, logs_dir, output_dir, epoch_number, split, checkpoints_dir=
                 sample[k] = sample[k].unsqueeze(0)
             else:
                 sample[k] = [sample[k]]
-        out_dir = os.path.join(output_dir, "eval_aoi", run_id, split)
+        out_dir = os.path.join(output_dir, run_id, split)
         os.makedirs(out_dir, exist_ok=True)
         save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number)
 

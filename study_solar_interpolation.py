@@ -94,10 +94,11 @@ def hstack_dsm_tifs_v1(img_paths, cmap=cv2.COLORMAP_VIRIDIS, crop=True, vmax=Non
     img = np.hstack(images)
     return img
 
-import sys
-sys.path.append('/home/roger/demtk')
-import iio, demtk
+
 def hstack_dsm_tifs_v2(img_paths, crop=True):
+    import sys
+    sys.path.append('/home/roger/demtk')
+    import iio, demtk
     images = []
     for p in img_paths:
         with rasterio.open(p) as f:
@@ -113,15 +114,28 @@ def hstack_dsm_tifs_v2(img_paths, crop=True):
     img = np.hstack(images)
     return img
 
-def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None, crops=True):
+def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None, root_dir=None, img_dir=None, gt_dir=None):
 
+    print(logs_dir)
     with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
         args = argparse.Namespace(**json.load(f))
 
-    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
-    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
-    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
-    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+    #args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    #args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    #args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    #args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+
+    if gt_dir is not None:
+        assert os.path.isdir(gt_dir)
+        args.gt_dir = gt_dir
+    if img_dir is not None:
+        assert os.path.isdir(img_dir)
+        args.img_dir = img_dir
+    if root_dir is not None:
+        assert os.path.isdir(root_dir)
+        args.root_dir = root_dir
+    if not os.path.isdir(args.cache_dir):
+        args.cache_dir = None
 
     # load pretrained nerf
     if checkpoints_dir is None:
@@ -168,7 +182,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None,
     else:
         ts = None
 
-    out_dir = os.path.join(output_dir, "solar_correction", run_id)
+    out_dir = os.path.join(output_dir, run_id)
 
     # run nerf for a range of vectors interpolated between solar direction bounds
     n_interp = 10
@@ -202,7 +216,7 @@ def sun_interp(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None,
             shutil.move(p, p.replace(".tif", "_solar_incidence_angle_{:.2f}deg.tif".format(solar_incidence_angle)))
         print("solar incidence angle {:.2f} completed ({} of {})".format(solar_incidence_angle, i+1, n_interp))
 
-    crop_summary_images = not crops
+    crop_summary_images = True
 
     # write summary images
     summary_dir = os.path.join(out_dir, "summary")

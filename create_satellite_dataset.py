@@ -207,7 +207,7 @@ def crop_geotiff_lonlat_aoi(geotiff_path, output_path, lonlat_aoi):
 def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, crop_aoi=True, splits=False):
 
     if crop_aoi:
-        # preare crops
+        # prepare crops
         aoi_lonlat = read_DFC2019_lonlat_aoi(aoi_id, dfc_dir)
         crops_dir = os.path.join(output_dir, "crops")
         os.makedirs(crops_dir, exist_ok=True)

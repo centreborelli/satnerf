@@ -15,15 +15,27 @@ import warnings
 warnings.filterwarnings("ignore")
 
 
-def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None):
+def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_dir=None, root_dir=None, img_dir=None, gt_dir=None):
 
     with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
         args = argparse.Namespace(**json.load(f))
 
-    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
-    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
-    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
-    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+    #args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    #args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    #args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    #args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+
+    if gt_dir is not None:
+        assert os.path.isdir(gt_dir)
+        args.gt_dir = gt_dir
+    if img_dir is not None:
+        assert os.path.isdir(img_dir)
+        args.img_dir = img_dir
+    if root_dir is not None:
+        assert os.path.isdir(root_dir)
+        args.root_dir = root_dir
+    if not os.path.isdir(args.cache_dir):
+        args.cache_dir = None
 
     # load pretrained nerf
     if checkpoints_dir is None:
@@ -71,24 +83,24 @@ def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_di
             sample[k] = sample[k].unsqueeze(0)
         else:
             sample[k] = [sample[k]]
-    out_dir = os.path.join(output_dir, "pretty_dsm", run_id, "tmp")
+    out_dir = os.path.join(output_dir, run_id, "tmp")
     os.makedirs(out_dir, exist_ok=True)
     save_nerf_output_to_images(dataset, sample, results, out_dir, epoch_number)
 
     # clean files
     tmp_path1 = glob.glob(os.path.join(out_dir, "dsm/*.tif"))[0]
     tmp_path2 = glob.glob(os.path.join(out_dir, "gt_rgb/*.tif"))[0]
-    tmp_path3 = os.path.join(output_dir, "pretty_dsm", run_id, "{}_gt_rgb.tif".format(src_id))
-    pred_dsm_path = os.path.join(output_dir, "pretty_dsm", run_id, "{}_dsm_epoch{}.tif".format(src_id, epoch_number))
+    tmp_path3 = os.path.join(output_dir, run_id, "{}_gt_rgb.tif".format(src_id))
+    pred_dsm_path = os.path.join(output_dir, run_id, "{}_dsm_epoch{}.tif".format(src_id, epoch_number))
     shutil.copyfile(tmp_path1, pred_dsm_path)
     shutil.copyfile(tmp_path2, tmp_path3)
     shutil.rmtree(out_dir)
-    for p in glob.glob(os.path.join(output_dir, "pretty_dsm", run_id, "tmp_crop*.tif")):
+    for p in glob.glob(os.path.join(output_dir, run_id, "tmp_crop*.tif")):
         os.remove(p)
 
     if args.gt_dir is not None:
         # evaluate NeRF generated DSM
-        out_dir = os.path.join(output_dir, "pretty_dsm", run_id)
+        out_dir = os.path.join(output_dir, run_id)
         mae = sat_utils.compute_mae_and_save_dsm_diff(pred_dsm_path, src_id, args.gt_dir, out_dir, epoch_number)
         print("Path to output NeRF DSM: {}".format(pred_dsm_path))
         print("Altitude MAE: {}".format(np.nanmean(mae)))
@@ -100,7 +112,7 @@ def create_pretty_dsm(run_id, logs_dir, output_dir, epoch_number, checkpoints_di
         # save tmp gt DSM
         aoi_id = src_id[:7]
         gt_dsm_path = os.path.join(args.gt_dir, "{}_DSM.tif".format(aoi_id))
-        tmp_gt_path = os.path.join(output_dir, "pretty_dsm", run_id, "tmp_gt.tif")
+        tmp_gt_path = os.path.join(output_dir, run_id, "tmp_gt.tif")
         if aoi_id in ["JAX_004", "JAX_260"]:
             gt_seg_path = os.path.join(args.gt_dir, "{}_CLS_v2.tif".format(aoi_id))
         else:

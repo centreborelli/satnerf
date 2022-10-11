@@ -1,3 +1,6 @@
+import matplotlib
+matplotlib.use('Agg')
+
 import matplotlib.pyplot as plt
 import numpy as np
 from datasets.satellite_depth import SatelliteDataset_depth
@@ -9,6 +12,8 @@ import torch
 import os
 import shutil
 import argparse
+
+
 
 def save_heatmap_of_reprojection_error(height, width, pts2d, track_err, smooth=20, plot=False):
     """
@@ -97,15 +102,27 @@ def idw_interpolation(pts2d, z, pts2d_query, N=8):
         z_query[known_query_indices] = z[nn_indices[known_query_indices, 0]]
     return z_query
 
-def check_depth_supervision_points(run_id, logs_dir, output_dir):
+def check_depth_supervision_points(run_id, logs_dir, output_dir, root_dir=None, img_dir=None, gt_dir=None):
 
     with open('{}/opts.json'.format(os.path.join(logs_dir, run_id)), 'r') as f:
         args = argparse.Namespace(**json.load(f))
 
-    args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
-    args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
-    args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
-    args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+    #args.root_dir = "/mnt/cdisk/roger/Datasets" + args.root_dir.split("Datasets")[-1]
+    #args.img_dir = "/mnt/cdisk/roger/Datasets" + args.img_dir.split("Datasets")[-1]
+    #args.cache_dir = "/mnt/cdisk/roger/Datasets" + args.cache_dir.split("Datasets")[-1]
+    #args.gt_dir = "/mnt/cdisk/roger/Datasets" + args.gt_dir.split("Datasets")[-1]
+
+    if gt_dir is not None:
+        assert os.path.isdir(gt_dir)
+        args.gt_dir = gt_dir
+    if img_dir is not None:
+        assert os.path.isdir(img_dir)
+        args.img_dir = img_dir
+    if root_dir is not None:
+        assert os.path.isdir(root_dir)
+        args.root_dir = root_dir
+    if not os.path.isdir(args.cache_dir):
+        args.cache_dir = None
 
     sat_dataset = SatelliteDataset_depth(root_dir=args.root_dir,
                                              img_dir=args.img_dir,
@@ -117,7 +134,7 @@ def check_depth_supervision_points(run_id, logs_dir, output_dir):
     tie_points = sat_dataset.tie_points
     kp_weights = sat_dataset.load_keypoint_weights_for_depth_supervision(json_files, tie_points)
 
-    output_dir = os.path.join(output_dir, "depth_supervision", run_id)
+    output_dir = os.path.join(output_dir, run_id)
     print("Output dir:", output_dir)
     for t, json_p in enumerate(json_files):
         # read json

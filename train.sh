@@ -7,6 +7,6 @@ python3 main.py --model sat-nerf \
                 --img_dir $project_dir/datasets/DFC2019/Track3-RGB-crops/JAX_068 \
                 --gt_dir $project_dir/datasets/DFC2019/Track3-Truth \
                 --cache_dir $project_dir/cache/crops_rpcs_ba_v2/JAX_068_ds1 \
-                --logs_dir project_dir/logs \
-                --ckpts_dir project_dir/checkpoints \
+                --logs_dir $project_dir/logs \
+                --ckpts_dir $project_dir/checkpoints \
                 --gpu_id 0

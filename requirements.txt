@@ -16,7 +16,7 @@ torchmetrics==0.6.0
 PyYAML<=5.4.1,>=5.1
 rasterio==1.2.10
 scipy==1.4.1
-srtm4==1.2.1
+srtm4
 utm==0.7.0
 scikit_image==0.16.2
 numba==0.53.1

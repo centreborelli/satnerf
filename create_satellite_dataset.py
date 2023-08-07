@@ -8,6 +8,9 @@ import sys
 import json
 from sat_utils import get_file_id
 import rasterio
+from bundle_adjust.cam_utils import SatelliteImage
+from bundle_adjust.ba_pipeline import BundleAdjustmentPipeline
+from bundle_adjust import loader
 
 
 def rio_open(*args,**kwargs):
@@ -18,32 +21,33 @@ def rio_open(*args,**kwargs):
         warnings.filterwarnings("ignore", category=UserWarning)
         return rasterio.open(*args,**kwargs)
 
+
 def get_image_lonlat_aoi(rpc, h, w):
     z = srtm4.srtm4(rpc.lon_offset, rpc.lat_offset)
-    cols, rows, alts = [0,w,w,0], [0,0,h,h], [z]*4
+    cols, rows, alts = [0, w, w, 0], [0, 0, h, h], [z]*4
     lons, lats = rpc.localization(cols, rows, alts)
-    lonlat_coords = np.vstack((lons, lats)).T
-    geojson_polygon = {"coordinates": [lonlat_coords.tolist()], "type": "Polygon"}
+
     x_c = lons.min() + (lons.max() - lons.min())/2
     y_c = lats.min() + (lats.max() - lats.min())/2
-    geojson_polygon["center"] = [x_c, y_c]
+    lonlat_coords = np.vstack((lons, lats)).T
+    geojson_polygon = {
+        "coordinates": [lonlat_coords.tolist()],
+        "type": "Polygon",
+        "center": [x_c, y_c]
+    }
     return geojson_polygon
 
+
 def run_ba(img_dir, output_dir):
-
-    from bundle_adjust.cam_utils import SatelliteImage
-    from bundle_adjust.ba_pipeline import BundleAdjustmentPipeline
-    from bundle_adjust import loader
-
-    # load input data
-    os.makedirs(output_dir, exist_ok=True)
     myimages = sorted(glob.glob(img_dir + "/*.tif"))
+
     myrpcs = [rpcm.rpc_from_geotiff(p) for p in myimages]
     input_images = [SatelliteImage(fn, rpc) for fn, rpc in zip(myimages, myrpcs)]
-    ba_input_data = {}
-    ba_input_data['in_dir'] = img_dir
-    ba_input_data['out_dir'] = os.path.join(output_dir, "ba_files")
-    ba_input_data['images'] = input_images
+    ba_input_data = {
+        'in_dir': img_dir,
+        'out_dir': os.path.join(output_dir, "ba_files"),
+        'images': input_images
+    }
     print('Input data set!\n')
 
     # redirect all prints to a bundle adjustment logfile inside the output directory
@@ -54,10 +58,19 @@ def run_ba(img_dir, output_dir):
     log_file = open(path_to_log_file, "w+")
     sys.stdout = log_file
     sys.stderr = log_file
+
     # run bundle adjustment
     #tracks_config = {'FT_reset': True, 'FT_sift_detection': 's2p', 'FT_sift_matching': 'epipolar_based', "FT_K": 300}
-    tracks_config = {'FT_reset': False, 'FT_save': True, 'FT_sift_detection': 's2p', 'FT_sift_matching': 'epipolar_based'}
-    ba_extra = {"cam_model": "rpc"}
+    tracks_config = {
+        'FT_reset': False,
+        'FT_save': True,
+        'FT_sift_detection': 's2p',
+        'FT_sift_matching': 'epipolar_based'
+    }
+    ba_extra = {
+        "cam_model": "rpc"
+    }
+
     ba_pipeline = BundleAdjustmentPipeline(ba_input_data, tracks_config=tracks_config, extra_ba_config=ba_extra)
     ba_pipeline.run()
     # close logfile
@@ -77,40 +90,39 @@ def run_ba(img_dir, output_dir):
     fnames_in_use = [ba_pipeline.images[idx].geotiff_path for idx in ba_pipeline.ba_params.cam_prev_indices]
     loader.save_list_of_paths(os.path.join(ba_params_dir, "geotiff_paths.txt"), fnames_in_use)
 
-def create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_ba=False):
 
-    # create a json file of metadata for each input image
-    # contains: h, w, rpc, sun elevation, sun azimuth, acquisition date
-    #           + geojson polygon with the aoi of the image
-    os.makedirs(output_dir, exist_ok=True)
-    path_to_dsm = os.path.join(dfc_dir, "Track3-Truth/{}_DSM.tif".format(aoi_id))
+def create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_ba=False):
+    path_to_dsm = os.path.join(dfc_dir, "Track3-Truth-JAX/{}_DSM.tif".format(aoi_id))
+
+    path_to_msi = ""
     if aoi_id[:3] == "JAX":
-        path_to_msi = "http://138.231.80.166:2334/core3d/Jacksonville/WV3/MSI"
+        path_to_msi = "/home/myid/zis35724/jupyter/DFC2019/Core3D/Satellite-Images/Jacksonville/WV3/MSI"
     elif aoi_id[:3] == "OMA":
-        path_to_msi = "http://138.231.80.166:2334/core3d/Omaha/WV3/MSI"
+        path_to_msi = "/home/myid/zis35724/jupyter/DFC2019/Core3D/Satellite-Images/Omaha/WV3/MSI"
+
+    geotiff_paths = sorted(glob.glob(img_dir + "/*.tif"))
+    ba_geotiff_basenames = [os.path.basename(x) for x in geotiff_paths]
+
+    ba_kps_pts3d_ind = None
+    ba_kps_cam_ind = None
+    ba_kps_pts2d = None
     if use_ba:
-        from bundle_adjust import loader
-        geotiff_paths = loader.load_list_of_paths(os.path.join(output_dir, "ba_files/ba_params/geotiff_paths.txt"))
-        geotiff_paths = [p.replace("/pan_crops/", "/crops/") for p in geotiff_paths]
-        geotiff_paths = [p.replace("PAN.tif", "RGB.tif") for p in geotiff_paths]
-        ba_geotiff_basenames = [os.path.basename(x) for x in geotiff_paths]
         ba_kps_pts3d_ind = np.load(os.path.join(output_dir, "ba_files/ba_params/pts_ind.npy"))
         ba_kps_cam_ind = np.load(os.path.join(output_dir, "ba_files/ba_params/cam_ind.npy"))
         ba_kps_pts2d = np.load(os.path.join(output_dir, "ba_files/ba_params/pts2d.npy"))
-    else:
-        geotiff_paths = sorted(glob.glob(img_dir + "/*.tif"))
 
     for rgb_p in geotiff_paths:
-        d = {}
-        d["img"] = os.path.basename(rgb_p)
-
+        print("processing", rgb_p)
         src = rio_open(rgb_p)
-        d["height"] = int(src.meta["height"])
-        d["width"] = int(src.meta["width"])
+        img_id = src.tags()["NITF_IID2"].replace(" ", "_")
         original_rpc = rpcm.RPCModel(src.tags(ns='RPC'), dict_format="geotiff")
 
-        img_id = src.tags()["NITF_IID2"].replace(" ", "_")
-        msi_p = "{}/{}.NTF".format(path_to_msi, img_id)
+        d = {}
+        d["img"] = os.path.basename(rgb_p)
+        d["height"] = int(src.meta["height"])
+        d["width"] = int(src.meta["width"])
+
+        msi_p = "{}/{}.vrt".format(path_to_msi, img_id)
         src = rio_open(msi_p)
         d["sun_elevation"] = src.tags()["NITF_USE00A_SUN_EL"]
         d["sun_azimuth"] = src.tags()["NITF_USE00A_SUN_AZ"]
@@ -121,25 +133,25 @@ def create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_b
         dsm = src.read()[0, :, :]
         d["min_alt"] = int(np.round(dsm.min() - 1))
         d["max_alt"] = int(np.round(dsm.max() + 1))
+        d["rpc"] = original_rpc.__dict__
 
         if use_ba:
             # use corrected rpc
             rpc_path = os.path.join(output_dir, "ba_files/rpcs_adj/{}.rpc_adj".format(get_file_id(rgb_p)))
             d["rpc"] = rpcm.rpc_from_rpc_file(rpc_path).__dict__
-            #d_out["rpc"] = rpc_rpcm_to_geotiff_format(rpc.__dict__)
 
             # additional fields for depth supervision
             ba_kps_pts3d_path = os.path.join(output_dir, "ba_files/ba_params/pts3d.npy")
             shutil.copyfile(ba_kps_pts3d_path, os.path.join(output_dir, "pts3d.npy"))
             cam_idx = ba_geotiff_basenames.index(d["img"])
-            d["keypoints"] = {"2d_coordinates": ba_kps_pts2d[ba_kps_cam_ind == cam_idx, :].tolist(),
-                              "pts3d_indices": ba_kps_pts3d_ind[ba_kps_cam_ind == cam_idx].tolist()}
-        else:
-            # use original rpc
-            d["rpc"] = original_rpc.__dict__
+            d["keypoints"] = {
+                "2d_coordinates": ba_kps_pts2d[ba_kps_cam_ind == cam_idx, :].tolist(),
+                "pts3d_indices": ba_kps_pts3d_ind[ba_kps_cam_ind == cam_idx].tolist()
+            }
 
         with open(os.path.join(output_dir, "{}.json".format(get_file_id(rgb_p))), "w") as f:
             json.dump(d, f, indent=2)
+
 
 def create_train_test_splits(input_sample_ids, test_percent=0.15, min_test_samples=2):
 
@@ -163,13 +175,18 @@ def create_train_test_splits(input_sample_ids, test_percent=0.15, min_test_sampl
 
     return train_samples, test_samples
 
+
 def read_DFC2019_lonlat_aoi(aoi_id, dfc_dir):
     from bundle_adjust import geo_utils
+
     if aoi_id[:3] == "JAX":
         zonestring = "17R"
+    elif aoi_id[:3] == "OMA":
+        zonestring = "14T"  # or 15T
     else:
-        raise ValueError("AOI not valid. Expected JAX_(3digits) but received {}".format(aoi_id))
-    roi = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth/" + aoi_id + "_DSM.txt"))
+        raise ValueError("AOI not valid. Expected JAX/OMA_(3digits) but received {}".format(aoi_id))
+
+    roi = np.loadtxt(os.path.join(dfc_dir, "Track3-Truth-JAX/" + aoi_id + "_DSM.txt"))
     xoff, yoff, xsize, ysize, resolution = roi[0], roi[1], int(roi[2]), int(roi[2]), roi[3]
     ulx, uly, lrx, lry = xoff, yoff + ysize * resolution, xoff + xsize * resolution, yoff
     xmin, xmax, ymin, ymax = ulx, lrx, uly, lry
@@ -177,12 +194,15 @@ def read_DFC2019_lonlat_aoi(aoi_id, dfc_dir):
     norths = [ymin, ymax, ymax, ymin, ymin]
     lons, lats = geo_utils.lonlat_from_utm(easts, norths, zonestring)
     lonlat_bbx = geo_utils.geojson_polygon(np.vstack((lons, lats)).T)
+
     return lonlat_bbx
+
 
 def crop_geotiff_lonlat_aoi(geotiff_path, output_path, lonlat_aoi):
     with rasterio.open(geotiff_path, 'r') as src:
         profile = src.profile
         tags = src.tags()
+
     crop, x, y = rpcm.utils.crop_aoi(geotiff_path, lonlat_aoi)
     rpc = rpcm.rpc_from_geotiff(geotiff_path)
     rpc.row_offset -= y
@@ -205,33 +225,25 @@ def crop_geotiff_lonlat_aoi(geotiff_path, output_path, lonlat_aoi):
 
 
 def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, crop_aoi=True, splits=False):
+    img_dir = os.path.join(dfc_dir, "Track3-RGB-JAX/{}".format(aoi_id))
+    os.makedirs(output_dir, exist_ok=True)
 
     if crop_aoi:
         # prepare crops
         aoi_lonlat = read_DFC2019_lonlat_aoi(aoi_id, dfc_dir)
         crops_dir = os.path.join(output_dir, "crops")
         os.makedirs(crops_dir, exist_ok=True)
-        img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
         myimages = sorted(glob.glob(img_dir + "/*.tif"))
-        pan = True
-        if aoi_id in ["JAX_004", "JAX_068"]:
-            pan_dir = "/vsicurl/http://138.231.80.166:2332/grss-2019/track_3/Track3-MSI-1/"
-        else:
-            pan_dir = "/vsicurl/http://138.231.80.166:2332/grss-2019/track_3/Track3-MSI-3/"
+
         for geotiff_path in myimages:
             out_crop_path = os.path.join(crops_dir, os.path.basename(geotiff_path))
             crop_geotiff_lonlat_aoi(geotiff_path, out_crop_path, aoi_lonlat)
-            if pan:
-                pan_crops_dir = os.path.join(output_dir, "pan_crops")
-                os.makedirs(pan_crops_dir, exist_ok=True)
-                out_crop_path = os.path.join(pan_crops_dir, os.path.basename(geotiff_path))
-                geotiff_path = os.path.join(pan_dir, os.path.basename(geotiff_path).replace("RGB.tif", "PAN.tif"))
-                crop_geotiff_lonlat_aoi(geotiff_path, out_crop_path, aoi_lonlat)
+
         img_dir = crops_dir
-    else:
-        img_dir = os.path.join(dfc_dir, "Track3-RGB/{}".format(aoi_id))
+
     if ba:
         run_ba(img_dir, output_dir)
+
     create_dataset_from_DFC2019_data(aoi_id, img_dir, dfc_dir, output_dir, use_ba=ba)
 
     # create train and test splits
@@ -244,6 +256,7 @@ def create_satellite_dataset(aoi_id, dfc_dir, output_dir, ba=True, crop_aoi=True
             f.write("\n".join(test_samples))
 
     print("done")
+
 
 if __name__ == '__main__':
     import fire

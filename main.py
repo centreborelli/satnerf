@@ -1,11 +1,9 @@
 #!/bin/env python
-import argparse
-
 import torch
 import pytorch_lightning as pl
 
 from opt import get_opts
-from datasets import load_dataset, satellite
+from datasets import load_dataset
 from metrics import load_loss, DepthLoss, SNerfLoss
 from torch.utils.data import DataLoader
 from collections import defaultdict
@@ -19,9 +17,10 @@ import numpy as np
 import datetime
 from sat_utils import compute_mae_and_save_dsm_diff
 
-from eval_satnerf import find_best_embbeding_for_val_image, save_nerf_output_to_images, predefined_val_ts
+from eval_satnerf import save_nerf_output_to_images, predefined_val_ts
 
-os.environ["CUDA_VISIBLE_DEVICES"] = "0, 1"
+os.environ["CUDA_VISIBLE_DEVICES"] = "0,1,2"
+
 
 class NeRF_pl(pl.LightningModule):
     """NeRF network"""
@@ -31,18 +30,18 @@ class NeRF_pl(pl.LightningModule):
         self.args = args
 
         self.loss = load_loss(args)
-        self.depth = args.ds_lambda > 0
-        if self.depth:
-            # depth supervision will be used
+        self.depth = args.ds_lambda > 0  # default no depth
+        if self.depth:  # depth supervision will be used
             self.depth_loss = DepthLoss(lambda_ds=args.ds_lambda)
             self.ds_drop = np.round(args.ds_drop * args.max_train_steps)
+
         self.define_models()
         self.val_im_dir = "{}/{}/val".format(args.logs_dir, args.exp_name)
         self.train_im_dir = "{}/{}/train".format(args.logs_dir, args.exp_name)
         self.train_steps = 0
 
-        self.use_ts = False
-        if self.args.model == "sat-nerf":
+        self.use_ts = False  # timestamp?
+        if self.args.model == "sat-nerf":  # sat-nerf use timestamp
             self.loss_without_beta = SNerfLoss(lambda_sc=args.sc_lambda)
             self.use_ts = True
 
@@ -58,15 +57,16 @@ class NeRF_pl(pl.LightningModule):
             self.models["t"] = self.embedding_t
 
     def forward(self, rays, ts):
-
         chunk_size = self.args.chunk
         batch_size = rays.shape[0]
 
         results = defaultdict(list)
         for i in range(0, batch_size, chunk_size):
-            rendered_ray_chunks = \
-                render_rays(self.models, self.args, rays[i:i + chunk_size],
-                            ts[i:i + chunk_size] if ts is not None else None)
+            rendered_ray_chunks = render_rays(self.models,
+                                              self.args,
+                                              rays[i:i + chunk_size],
+                                              ts[i:i + chunk_size] if ts is not None else None)
+
             for k, v in rendered_ray_chunks.items():
                 results[k] += [v]
 
@@ -96,23 +96,27 @@ class NeRF_pl(pl.LightningModule):
     def train_dataloader(self):
         a = DataLoader(self.train_dataset[0],
                        shuffle=True,
-                       num_workers=4,
+                       num_workers=16,
                        batch_size=self.args.batch_size,
                        pin_memory=True)
-        loaders = {"color": a}
+        loaders = {
+            "color": a
+        }
+
         if self.depth:
             b = DataLoader(self.train_dataset[1],
                            shuffle=True,
-                           num_workers=4,
+                           num_workers=16,
                            batch_size=self.args.batch_size,
                            pin_memory=True)
             loaders["depth"] = b
+
         return loaders
 
     def val_dataloader(self):
         return DataLoader(self.val_dataset[0],
                           shuffle=False,
-                          num_workers=4,
+                          num_workers=16,
                           batch_size=1,  # validate one image (H*W rays) at a time
                           pin_memory=True)
 
@@ -120,9 +124,9 @@ class NeRF_pl(pl.LightningModule):
         self.log("lr", train_utils.get_learning_rate(self.optimizer))
         self.train_steps += 1
 
-        rays = batch["color"]["rays"] # (B, 11)
-        rgbs = batch["color"]["rgbs"] # (B, 3)
-        ts = None if not self.use_ts else batch["color"]["ts"].squeeze() # (B, 1)
+        rays = batch["color"]["rays"]  # (B, 11)
+        rgbs = batch["color"]["rgbs"]  # (B, 3)
+        ts = None if not self.use_ts else batch["color"]["ts"].squeeze()  # (B, 1)
 
         results = self(rays, ts)
         if 'beta_coarse' in results and self.get_current_epoch(self.train_steps) < 2:
@@ -151,13 +155,17 @@ class NeRF_pl(pl.LightningModule):
             self.log("train/{}".format(k), loss_dict[k])
 
         self.log('train_psnr', psnr_, on_step=True, on_epoch=True, prog_bar=True)
-        return {'loss': loss}
+        return {
+            'loss': loss,
+            'train/psnr': psnr_
+        }
 
     def validation_step(self, batch, batch_nb):
 
         rays, rgbs = batch["rays"], batch["rgbs"]
         rays = rays.squeeze()  # (H*W, 3)
         rgbs = rgbs.squeeze()  # (H*W, 3)
+
         if self.args.model == "sat-nerf":
             t = predefined_val_ts(batch["src_id"][0])
             ts = t * torch.ones(rays.shape[0], 1).long().cuda().squeeze()
@@ -186,6 +194,7 @@ class NeRF_pl(pl.LightningModule):
         # save output for a training image (batch_nb == 0) and a validation image (batch_nb == 1)
         epoch = self.get_current_epoch(self.train_steps)
         save = not bool(epoch % self.args.save_every_n_epochs)
+
         if (batch_nb == 0 or batch_nb == 1) and self.args.data == 'sat' and save:
             # save some images to disk for a more detailed visualization
             out_dir = self.val_im_dir if self.is_validation_image else self.train_im_dir
@@ -193,6 +202,7 @@ class NeRF_pl(pl.LightningModule):
 
         psnr_ = metrics.psnr(results[f"rgb_{typ}"], rgbs)
         ssim_ = metrics.ssim(results[f"rgb_{typ}"].view(1, 3, H, W), rgbs.view(1, 3, H, W))
+        mae_ = 0.0
 
         if self.args.data != 'sat':
             self.log("val/loss", loss)
@@ -212,8 +222,12 @@ class NeRF_pl(pl.LightningModule):
                     unique_identifier = datetime.datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
                     out_path = os.path.join(self.val_im_dir, "dsm/tmp_pred_dsm_{}.tif".format(unique_identifier))
                     _ = self.val_dataset[0].get_dsm_from_nerf_prediction(rays.cpu(), depth.cpu(), dsm_path=out_path)
-                    mae_ = compute_mae_and_save_dsm_diff(out_path, batch["src_id"][0],
-                                                         self.args.gt_dir, self.val_im_dir, 0, save=False)
+                    mae_ = compute_mae_and_save_dsm_diff(out_path,
+                                                         batch["src_id"][0],
+                                                         self.args.gt_dir,
+                                                         self.val_im_dir,
+                                                         0,
+                                                         save=False)
                     os.remove(out_path)
                 except:
                     mae_ = np.nan
@@ -225,18 +239,25 @@ class NeRF_pl(pl.LightningModule):
                 for k in loss_dict.keys():
                     self.log("val/{}".format(k), loss_dict[k])
 
-        return {"loss": loss}
+        return {
+            "loss": loss,
+            "val/psnr": psnr_,
+            "val/ssim": ssim_,
+            "val/mae": mae_
+        }
 
     def get_current_epoch(self, tstep):
         return train_utils.get_epoch_number_from_train_step(tstep, len(self.train_dataset[0]), self.args.batch_size)
 
-def main():
 
+def main():
     torch.cuda.empty_cache()
     args = get_opts()
     system = NeRF_pl(args)
 
-    logger = pl.loggers.TensorBoardLogger(save_dir=args.logs_dir, name=args.exp_name, default_hp_metric=False)
+    logger = pl.loggers.TensorBoardLogger(save_dir=args.logs_dir,
+                                          name=args.exp_name,
+                                          default_hp_metric=False)
 
     ckpt_callback = pl.callbacks.ModelCheckpoint(dirpath="{}/{}".format(args.ckpts_dir, args.exp_name),
                                                  filename="{epoch:d}",
@@ -249,7 +270,7 @@ def main():
                          logger=logger,
                          callbacks=[ckpt_callback],
                          resume_from_checkpoint=args.ckpt_path,
-                         gpus=[args.gpu_id],
+                         gpus=args.gpu_id,
                          auto_select_gpus=False,
                          deterministic=True,
                          benchmark=True,

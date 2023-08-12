@@ -1,24 +1,27 @@
 #!/usr/bin/env bash
 
-export project_dir=~/jupyter/satnerf
-export exp_dir=~/jupyter/satnerf/exp
-export exp_name=JAX_068_ds1_nerf_2gpu_batch2048
+PROJECT_DIR=~/jupyter/satnerf
+EXP_DIR=~/jupyter/satnerf/exp
+TRAIN_STEPS=6250
+BATCH_SIZE=32768
+CHUNK=65536
+EXP_NAME=JAX_068_ds1_nerf_debug
 
-if [ ! -d "$exp_dir/$exp_name" ]; then
-  mkdir "$exp_dir/$exp_name"
+if [ ! -d "$EXP_DIR/$EXP_NAME" ]; then
+  mkdir "$EXP_DIR/$EXP_NAME"
 fi
 
-python3 main.py --root_dir $project_dir/datasets/root_dir/crops_rpcs_raw/JAX_068 \
-                --img_dir $project_dir/datasets/DFC2019/Track3-RGB-crops/JAX_068 \
-                --gt_dir $project_dir/datasets/DFC2019/Track3-Truth \
-                --exp_name $exp_name \
+python3 main.py --root_dir $PROJECT_DIR/datasets/root_dir/crops_rpcs_raw/JAX_068 \
+                --img_dir $PROJECT_DIR/datasets/DFC2019/Track3-RGB-crops/JAX_068 \
+                --gt_dir $PROJECT_DIR/datasets/DFC2019/Track3-Truth \
+                --exp_name $EXP_NAME \
                 --model nerf \
                 --img_downscale 1 \
-                --cache_dir $exp_dir/$exp_name/cache/crops_rpcs_raw/JAX_068_ds1 \
-                --logs_dir $exp_dir/$exp_name/logs \
-                --ckpts_dir $exp_dir/$exp_name/checkpoints \
+                --cache_dir $EXP_DIR/$EXP_NAME/cache/crops_rpcs_raw/JAX_068_ds1 \
+                --logs_dir $EXP_DIR/$EXP_NAME/logs \
+                --ckpts_dir $EXP_DIR/$EXP_NAME/checkpoints \
                 --gpu_id 2 \
-                --max_train_steps 50000 \
-                --batch_size 2048 \
-                --chunk 4096 \
-                --fc_units 256 2>> $exp_dir/$exp_name/outputs.txt
+                --max_train_steps $TRAIN_STEPS \
+                --batch_size $BATCH_SIZE \
+                --chunk $CHUNK \
+                --fc_units 256

@@ -15,6 +15,7 @@ class NerfLoss(torch.nn.Module):
         loss_dict['coarse_color'] = self.loss(inputs['rgb_coarse'], targets)
         if 'rgb_fine' in inputs:
             loss_dict['fine_color'] = self.loss(inputs['rgb_fine'], targets)
+
         loss = sum(l for l in loss_dict.values())
         return loss, loss_dict
 
@@ -103,7 +104,7 @@ def load_loss(args):
     return loss_function
 
 def mse(image_pred, image_gt, valid_mask=None, reduction='mean'):
-    value = (image_pred-image_gt)**2
+    value = (image_pred - image_gt) ** 2
     if valid_mask is not None:
         value = value[valid_mask]
     if reduction == 'mean':
@@ -111,7 +112,7 @@ def mse(image_pred, image_gt, valid_mask=None, reduction='mean'):
     return value
 
 def psnr(image_pred, image_gt, valid_mask=None, reduction='mean'):
-    return -10*torch.log10(mse(image_pred, image_gt, valid_mask, reduction))
+    return -10 * torch.log10(mse(image_pred, image_gt, valid_mask, reduction))
 
 def ssim(image_pred, image_gt):
     """

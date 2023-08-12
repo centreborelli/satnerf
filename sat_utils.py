@@ -159,22 +159,23 @@ def dsm_pointwise_diff(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None
         pred_dsm = f.read()[0, :, :]
 
     # register and compute mae
-    fix_xy = False
-    try:
-        import dsmr
-    except:
-        print("Warning: dsmr not found ! DSM registration will only use the Z dimension")
-        fix_xy = True
-    if fix_xy:
-        pred_rdsm = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
-        with rasterio.open(pred_rdsm_path, 'w', **profile) as dst:
-            dst.write(pred_rdsm, 1)
-    else:
-        import dsmr
-        transform = dsmr.compute_shift(gt_dsm_path, pred_dsm_path, scaling=False)
-        dsmr.apply_shift(pred_dsm_path, pred_rdsm_path, *transform)
-        with rasterio.open(pred_rdsm_path, "r") as f:
-            pred_rdsm = f.read()[0, :, :]
+    # fix_xy = False
+    # try:
+    #     import dsmr
+    # except:
+    #     print("Warning: dsmr not found ! DSM registration will only use the Z dimension")
+    #     fix_xy = True
+
+    # if fix_xy:
+    #     pred_rdsm = pred_dsm + np.nanmean((gt_dsm - pred_dsm).ravel())
+    #     with rasterio.open(pred_rdsm_path, 'w', **profile) as dst:
+    #         dst.write(pred_rdsm, 1)
+    # else:
+    import dsmr
+    transform = dsmr.compute_shift(gt_dsm_path, pred_dsm_path, scaling=False)
+    dsmr.apply_shift(pred_dsm_path, pred_rdsm_path, *transform)
+    with rasterio.open(pred_rdsm_path, "r") as f:
+        pred_rdsm = f.read()[0, :, :]
     err = pred_rdsm - gt_dsm
 
     # remove tmp files and write output tifs if desired
@@ -199,24 +200,35 @@ def compute_mae_and_save_dsm_diff(pred_dsm_path, src_id, gt_dir, out_dir, epoch_
     aoi_id = src_id[:7]
     gt_dsm_path = os.path.join(gt_dir, "{}_DSM.tif".format(aoi_id))
     gt_roi_path = os.path.join(gt_dir, "{}_DSM.txt".format(aoi_id))
+
     if aoi_id in ["JAX_004", "JAX_260"]:
         gt_seg_path = os.path.join(gt_dir, "{}_CLS_v2.tif".format(aoi_id))
     else:
         gt_seg_path = os.path.join(gt_dir, "{}_CLS.tif".format(aoi_id))
+
     assert os.path.exists(gt_roi_path), f"{gt_roi_path} not found"
     assert os.path.exists(gt_dsm_path), f"{gt_dsm_path} not found"
     assert os.path.exists(gt_seg_path), f"{gt_seg_path} not found"
+
     from sat_utils import dsm_pointwise_diff
+
     gt_roi_metadata = np.loadtxt(gt_roi_path)
     rdsm_diff_path = os.path.join(out_dir, "{}_rdsm_diff_epoch{}.tif".format(src_id, epoch_number))
     rdsm_path = os.path.join(out_dir, "{}_rdsm_epoch{}.tif".format(src_id, epoch_number))
-    diff = dsm_pointwise_diff(pred_dsm_path, gt_dsm_path, gt_roi_metadata, gt_mask_path=gt_seg_path,
-                                       out_rdsm_path=rdsm_path, out_err_path=rdsm_diff_path)
+    diff = dsm_pointwise_diff(pred_dsm_path,
+                              gt_dsm_path,
+                              gt_roi_metadata,
+                              gt_mask_path=gt_seg_path,
+                              out_rdsm_path=rdsm_path,
+                              out_err_path=rdsm_diff_path)
+
     #os.system(f"rm tmp*.tif.xml")
     if not save:
         os.remove(rdsm_diff_path)
         os.remove(rdsm_path)
+
     return np.nanmean(abs(diff.ravel()))
+
 
 def dsm_mae(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=None):
     abs_err = dsm_pointwise_abs_errors(in_dsm_path, gt_dsm_path, dsm_metadata, gt_mask_path=gt_mask_path)

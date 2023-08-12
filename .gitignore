@@ -1,7 +1,5 @@
 __pycache__
 .idea
-#try_exp/logs
-#try_exp/checkpoints
 .ipynb_checkpoints
-#datasets/
+datasets/
 exp/

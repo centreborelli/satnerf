@@ -1,6 +1,6 @@
 # Sat-NeRF
 ---
-**UPDATE JUNE 2023 !!!** Have a look at [EO-NeRF](https://rogermm14.github.io/eonerf/), our latest method for multi-view satellite photogrammetry using neural radiance fields.
+&#128293; &#128293; **UPDATE JUNE 2023 !!!** Have a look at [EO-NeRF](https://rogermm14.github.io/eonerf/), our latest method for multi-view satellite photogrammetry using neural radiance fields. &#128293; &#128293;
 
 ---
 

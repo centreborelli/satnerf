@@ -3,7 +3,7 @@ This script defines the evaluation metrics and the loss functions
 """
 
 import torch
-from kornia.losses import ssim as ssim_
+from kornia.losses import ssim_loss
 
 class NerfLoss(torch.nn.Module):
     def __init__(self):
@@ -118,4 +118,4 @@ def ssim(image_pred, image_gt):
     image_pred and image_gt: (1, 3, H, W)
     important: kornia==0.5.3
     """
-    return torch.mean(ssim_(image_pred, image_gt, 3))
+    return torch.mean(ssim_loss(image_pred, image_gt, 3))

@@ -3,6 +3,18 @@
 &#128293; &#128293; **UPDATE JUNE 2023 !!!** Have a look at [EO-NeRF](https://rogermm14.github.io/eonerf/), our latest method for multi-view satellite photogrammetry using neural radiance fields. &#128293; &#128293;
 
 ---
+### Updates and Fixes in the Project
+Issue: TypeError with SSIM Calculation
+During the execution of the training script, a TypeError: 'module' object is not callable was encountered. This issue was identified within the metrics.py file, specifically in the ssim function. The error occurred because the alias ssim_ for the kornia.losses.ssim function was mistakenly treated as a callable function.
+
+Additional Adjustments in main.py
+In addition to fixing the TypeError, other enhancements and clarifications were made in the main.py file to improve the overall functionality and readability of the script:
+
+Ensured proper initialization and configuration of the training setup.
+Enhanced logging for better traceability of the training process.
+Improved handling of training and validation steps to ensure smooth execution.
+Adjusted the code to accommodate various configurations and parameters as required by the project.
+
 
 ### [[Project page]](https://centreborelli.github.io/satnerf)
 

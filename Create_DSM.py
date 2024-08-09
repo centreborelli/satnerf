@@ -10,7 +10,7 @@ output_mesh_path = 'your_preferred_path'  # Path for the high-quality mesh PLY f
 # Display progress bar for DSM Image Load
 print("Loading DSM Image...")
 with tqdm(total=100, desc="Progress", ncols=100) as pbar:
-    dsm_image = Image.open('tiff_image_path')
+    dsm_image = Image.open('/Users/caz/Downloads/target.tif')
     dsm_array = np.array(dsm_image)
     pbar.update(20)  # 20% completed
 
@@ -56,10 +56,11 @@ if np.any(vertices_to_remove):
     mesh.remove_vertices_by_mask(vertices_to_remove)  # Remove the identified vertices from the mesh
 pbar.update(10)  # 90% completed
 
-# Save high-quality mesh to PLY file: Save the refined mesh to a PLY file
+# Save high-quality mesh to PLY and OBJ files
 print("Saving Mesh and Point Cloud...")
-o3d.io.write_triangle_mesh(output_mesh_path, mesh)
-o3d.io.write_point_cloud(output_ply_path, point_cloud)
+o3d.io.write_triangle_mesh(output_mesh_ply_path, mesh)  # Save as PLY
+o3d.io.write_triangle_mesh(output_mesh_obj_path, mesh)  # Save as OBJ
+o3d.io.write_point_cloud(output_ply_path, point_cloud)  # Save the original point cloud to a PLY file
 pbar.update(10)  # 100% completed
 
 print("Process Completed.")

@@ -4,15 +4,18 @@ import open3d as o3d
 from tqdm import tqdm
 
 # Output paths: Set the paths for saving the results
-output_ply_path = 'your_preferred_path'  # Path for the point cloud PLY file
-output_mesh_path = 'your_preferred_path'  # Path for the high-quality mesh PLY file
+output_ply_path = 'your_path/output.ply'  # Path for the point cloud PLY file
+output_mesh_ply_path = 'your_path/mesh_output.ply'  # Path for the high-quality mesh PLY file
+output_mesh_obj_path = 'your_path/mesh_output.obj'  # Path for the high-quality mesh OBJ file
 
 # Display progress bar for DSM Image Load
 print("Loading DSM Image...")
 with tqdm(total=100, desc="Progress", ncols=100) as pbar:
-    dsm_image = Image.open('/Users/caz/Downloads/target.tif')
+    dsm_image = Image.open('your_tif_path/.tif')
     dsm_array = np.array(dsm_image)
     pbar.update(20)  # 20% completed
+
+    
 
 # Check if the DSM array is empty or not
 if dsm_array.size == 0:

@@ -70,11 +70,11 @@ def get_opts():
     parser.add_argument('--ds_noweights', action='store_true',
                         help='do not use reprojection errors to weight depth supervision loss')
     parser.add_argument('--first_beta_epoch', type=int, default=2,
-                        help='portion of training steps at which the depth supervision loss will be dropped')
+                        help='epoch from which transients are estimated')
     parser.add_argument('--t_embbeding_tau', type=int, default=4,
-                        help='portion of training steps at which the depth supervision loss will be dropped')
+                        help='dimension of the image-dependent embedding')
     parser.add_argument('--t_embbeding_vocab', type=int, default=30,
-                        help='portion of training steps at which the depth supervision loss will be dropped')
+                        help='Number of image-dependent embeddings, it needs to be at least the number of training images')
 
     args = parser.parse_args()
 

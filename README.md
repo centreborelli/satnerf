@@ -1,12 +1,14 @@
 # Sat-NeRF
 ---
-&#128293; &#128293; **UPDATE JUNE 2023 !!!** Have a look at [EO-NeRF](https://rogermm14.github.io/eonerf/), our latest method for multi-view satellite photogrammetry using neural radiance fields. &#128293; &#128293;
+:fire: **UPDATE JUNE 2023** :fire: Have a look at [EO-NeRF](https://rogermm14.github.io/eonerf/), our latest method for multi-view satellite photogrammetry using neural radiance fields.
+
+:tada: :tada: The [EO-NeRF code](https://github.com/rogermm14/eonerf_code) is finally out! :tada: :tada:
 
 ---
 
 ### [[Project page]](https://centreborelli.github.io/satnerf)
 
-Developed at the [ENS Paris-Saclay, Centre Borelli](https://www.centreborelli.fr/) and accepted at the [CVPR EarthVision Workshop 2022](https://www.grss-ieee.org/events/earthvision-2022/).
+:wrench: Developed at the [ENS Paris-Saclay, Centre Borelli](https://www.centreborelli.fr/) and accepted at the [CVPR EarthVision Workshop 2022](https://www.grss-ieee.org/events/earthvision-2022/).
 
 ### [Sat-NeRF: Learning Multi-View Satellite Photogrammetry With Transient Objects and Shadow Modeling Using RPC Cameras](https://openaccess.thecvf.com/content/CVPR2022W/EarthVision/papers/Mari_Sat-NeRF_Learning_Multi-View_Satellite_Photogrammetry_With_Transient_Objects_and_Shadow_CVPRW_2022_paper.pdf)
 *[Roger Marí](https://scholar.google.com/citations?user=TgpSmIsAAAAJ&hl=en), 
